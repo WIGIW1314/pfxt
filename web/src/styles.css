@@ -31,8 +31,7 @@
   object-fit: contain !important;
 }
 
-body:has(.el-overlay-dialog) .page-shell,
-body:has(.el-image-viewer__wrapper) .page-shell,
+body.el-popup-parent--hidden .page-shell,
 body:has(.qr-preview-overlay) .page-shell {
   pointer-events: none;
 }
