@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Setting, Upload, UserFilled } from "@element-plus/icons-vue";
+import { Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
 import AppShell from "../components/AppShell.vue";
 import { api, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
@@ -141,6 +141,8 @@ const mobileDialog = computed(() => window.innerWidth < 768);
 const isCompactResultPagination = ref(typeof window !== "undefined" ? window.innerWidth <= 560 : false);
 const resultCurrentPage = ref(1);
 const resultPageSize = ref(24);
+const resultsScrollRef = ref<HTMLElement | null>(null);
+const showResultsBackTop = ref(false);
 const resultPaginationLayout = computed(() =>
   isCompactResultPagination.value ? "prev, pager, next" : "total, sizes, prev, pager, next, jumper",
 );
@@ -153,11 +155,33 @@ const paginatedResults = computed(() => {
 });
 watch(results, () => {
   resultCurrentPage.value = 1;
+  showResultsBackTop.value = false;
 });
 
 function syncResponsiveState() {
   if (typeof window === "undefined") return;
   isCompactResultPagination.value = window.innerWidth <= 560;
+}
+
+function syncResultsBackTopVisibility() {
+  if (typeof window === "undefined") {
+    showResultsBackTop.value = false;
+    return;
+  }
+  const pageScrolled = window.scrollY > 180;
+  const panelScrolled = (resultsScrollRef.value?.scrollTop ?? 0) > 140;
+  showResultsBackTop.value = pageScrolled || panelScrolled;
+}
+
+function handleResultsScroll() {
+  syncResultsBackTopVisibility();
+}
+
+function scrollResultsToTop() {
+  resultsScrollRef.value?.scrollTo({ top: 0, behavior: "smooth" });
+  if (typeof window !== "undefined") {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 }
 function formatDecimalScore(val: any) {
   if (val == null || val === "" || isNaN(val)) return "-";
@@ -1590,13 +1614,16 @@ watch(
 
 onMounted(() => {
   syncResponsiveState();
+  syncResultsBackTopVisibility();
   window.addEventListener("resize", syncResponsiveState);
+  window.addEventListener("scroll", syncResultsBackTopVisibility);
   fetchAll();
 });
 
 onUnmounted(() => {
   if (typeof window !== "undefined") {
     window.removeEventListener("resize", syncResponsiveState);
+    window.removeEventListener("scroll", syncResultsBackTopVisibility);
   }
 });
 </script>
@@ -2261,7 +2288,7 @@ onUnmounted(() => {
           <h3 style="margin: 0">结果汇总</h3>
           <el-button type="primary" @click="downloadFile(`/api/admin/activities/${activityId}/export/results`, 'results.xlsx')">导出 Excel</el-button>
         </div>
-        <div style="flex: 1; overflow-y: auto; padding-right: 4px;">
+        <div ref="resultsScrollRef" class="admin-results-scroll" style="flex: 1; overflow-y: auto; padding-right: 4px;" @scroll="handleResultsScroll">
           <template v-if="paginatedResults.length">
             <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
               <div v-for="row in paginatedResults" :key="row.id" class="glass-panel" :style="[{ padding: '16px', borderRadius: '8px', position: 'relative', overflow: 'hidden' }, getScoreColorStyle(row.summary?.finalScore)]">
@@ -2317,6 +2344,16 @@ onUnmounted(() => {
           />
         </div>
       </section>
+      <transition name="el-fade-in-linear">
+        <el-button
+          v-if="isCompactResultPagination && showResultsBackTop"
+          class="results-backtop-button"
+          circle
+          type="primary"
+          :icon="Top"
+          @click="scrollResultsToTop"
+        />
+      </transition>
     </template>
 
     <template v-else-if="section === 'logs'">

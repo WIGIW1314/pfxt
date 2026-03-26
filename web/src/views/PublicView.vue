@@ -2,11 +2,12 @@
 import { defineAsyncComponent, ref, computed, onMounted, onUnmounted } from "vue";
 import { useRoute } from "vue-router";
 import {
+  ArrowDown,
+  ArrowRight,
   Calendar,
   Clock,
   Location,
   UserFilled,
-  Notebook,
   InfoFilled,
   Search,
 } from "@element-plus/icons-vue";
@@ -28,9 +29,11 @@ const route = useRoute();
 const section = computed(() => (route.params.section as string) || "groups");
 
 const loading = ref(true);
-const previewUrl = ref("");
+const previewQrcode = ref<{ url: string; name: string } | null>(null);
 const error = ref("");
 const activity = ref<any>(null);
+const collapsedGroups = ref<Record<string, boolean>>({});
+const collapsedStudentLists = ref<Record<string, boolean>>({});
 let eventSource: EventSource | null = null;
 
 const activeTemplate = computed(() => {
@@ -150,6 +153,33 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   const hash = Array.from(name).reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   return themes[hash % themes.length];
 }
+
+function isGroupCollapsed(groupId: string) {
+  return Boolean(collapsedGroups.value[groupId]);
+}
+
+function isStudentListCollapsed(groupId: string) {
+  return Boolean(collapsedStudentLists.value[groupId]);
+}
+
+function toggleGroupCollapse(groupId: string) {
+  collapsedGroups.value = {
+    ...collapsedGroups.value,
+    [groupId]: !collapsedGroups.value[groupId],
+  };
+}
+
+function toggleStudentListCollapse(groupId: string) {
+  collapsedStudentLists.value = {
+    ...collapsedStudentLists.value,
+    [groupId]: !collapsedStudentLists.value[groupId],
+  };
+}
+
+function hasRoleDuty(student: any) {
+  const desc = String(student?.customRole?.description || "").trim();
+  return Boolean(desc) && !["无", "无职责", "暂无", "暂无职责"].includes(desc);
+}
 </script>
 
 <template>
@@ -171,15 +201,7 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
     <template v-else-if="activity">
       <!-- ========= 分组信息 ========= -->
       <template v-if="section === 'groups'">
-        <div class="public-page-header glass-panel">
-          <div class="public-page-title">
-            <el-icon :size="18" color="var(--primary)"><Calendar /></el-icon>
-            <span>{{ activity.name }}</span>
-          </div>
-          <div v-if="activity.description" class="public-page-desc">{{ activity.description }}</div>
-        </div>
-
-        <div class="public-search-bar glass-panel">
+        <div class="public-search-bar">
           <el-input
             v-model="studentSearch"
             placeholder="搜索学生姓名、学号、班级、角色…"
@@ -191,6 +213,7 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
             匹配到 <strong>{{ matchCount }}</strong> 名学生（{{ filteredGroups.length }} 个分组）
           </div>
         </div>
+        <div class="public-search-bar-spacer"></div>
 
         <div v-if="!filteredGroups.length" class="glass-panel" style="padding: 30px; text-align: center; color: var(--muted)">
           {{ studentSearch.trim() ? '没有匹配的学生' : '暂无分组信息' }}
@@ -198,27 +221,109 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
 
         <div v-for="group in filteredGroups" :key="group.id" class="public-group-card glass-panel">
           <div class="public-group-header">
-            <h3 class="public-group-name">{{ group.name }}</h3>
-            <div class="public-group-meta">
-              <span v-if="group.location" class="public-meta-item">
-                <el-icon :size="13"><Location /></el-icon>{{ group.location }}
-              </span>
-              <span v-if="group.scheduleTime" class="public-meta-item">
-                <el-icon :size="13"><Clock /></el-icon>{{ formatTime(group.scheduleTime) }}
-              </span>
-              <span v-if="group.startTime" class="public-meta-item">
-                <el-icon :size="13"><Clock /></el-icon>{{ formatTime(group.startTime) }} ~ {{ formatTime(group.endTime) }}
-              </span>
+            <button type="button" class="public-group-toggle" @click="toggleGroupCollapse(group.id)">
+              <el-icon :size="15">
+                <component :is="isGroupCollapsed(group.id) ? ArrowRight : ArrowDown" />
+              </el-icon>
+              <div class="public-group-title-block">
+                <h3 class="public-group-name">{{ group.name }}</h3>
+                <div class="public-group-meta">
+                  <span v-if="group.location" class="public-meta-item">
+                    <el-icon :size="13"><Location /></el-icon>{{ group.location }}
+                  </span>
+                  <span v-if="group.scheduleTime" class="public-meta-item">
+                    <el-icon :size="13"><Clock /></el-icon>{{ formatTime(group.scheduleTime) }}
+                  </span>
+                  <span v-if="group.startTime" class="public-meta-item">
+                    <el-icon :size="13"><Clock /></el-icon>{{ formatTime(group.startTime) }} ~ {{ formatTime(group.endTime) }}
+                  </span>
+                </div>
+              </div>
+            </button>
+
+            <div v-if="group.qrcodeUrl" class="public-qrcode public-qrcode-corner">
+              <img
+                :src="group.qrcodeUrl"
+                class="public-qrcode-img"
+                style="cursor: pointer"
+                @click="previewQrcode = { url: group.qrcodeUrl, name: group.name }"
+              />
             </div>
           </div>
 
-          <!-- 评委列表 -->
-          <div v-if="group.judges?.length" class="public-judges">
+          <div v-if="!isGroupCollapsed(group.id)" class="public-group-body">
+            <!-- 评委列表 -->
+            <div v-if="group.judges?.length" class="public-judges">
+              <div class="public-section-label"><el-icon :size="13"><UserFilled /></el-icon>评委</div>
+              <div class="public-judge-tags">
+                <el-tag
+                  v-for="(judge, i) in group.judges"
+                  :key="i"
+                  :color="judge.customRole?.color || '#409eff'"
+                  effect="dark"
+                  size="small"
+                  style="border: 0"
+                >
+                  {{ judge.realName }}
+                  <template v-if="judge.customRole">（{{ judge.customRole.name }}）</template>
+                </el-tag>
+              </div>
+            </div>
+
+            <!-- 学生列表 -->
+            <div v-if="group.students?.length" class="public-students">
+              <button type="button" class="public-students-toggle" @click="toggleStudentListCollapse(group.id)">
+                <span class="public-section-label public-section-label-inline">学生名单（{{ group.students.length }}）</span>
+                <el-icon :size="14">
+                  <component :is="isStudentListCollapsed(group.id) ? ArrowRight : ArrowDown" />
+                </el-icon>
+              </button>
+              <div v-if="!isStudentListCollapsed(group.id)" class="public-students-grid">
+                <article
+                  v-for="student in group.students"
+                  :key="student.id"
+                  class="public-student-card"
+                  :class="{ 'public-student-card-wide': hasRoleDuty(student) }"
+                  :style="{
+                    background: roleTheme(student.customRole).cardBg,
+                    borderColor: roleTheme(student.customRole).border,
+                  }"
+                >
+                  <div class="public-student-card-top">
+                    <div class="public-student-main">
+                      <span class="public-student-no">#{{ student.orderNo }}</span>
+                      <span class="public-student-name">{{ student.name }}</span>
+                    </div>
+                    <span
+                      class="public-student-role"
+                      :style="{
+                        background: roleTheme(student.customRole).chipBg,
+                        color: roleTheme(student.customRole).chipText,
+                      }"
+                    >
+                      {{ student.customRole?.name || "普通成员" }}
+                    </span>
+                  </div>
+
+                  <div class="public-student-meta">
+                    <span>学号：{{ student.studentNo || "—" }}</span>
+                    <span>班级：{{ student.className || "—" }}</span>
+                  </div>
+
+                  <div class="public-student-desc" v-if="hasRoleDuty(student)">
+                    {{ student.customRole.description }}
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <div v-else-if="group.judges?.length" class="public-group-collapsed-judges">
             <div class="public-section-label"><el-icon :size="13"><UserFilled /></el-icon>评委</div>
             <div class="public-judge-tags">
               <el-tag
                 v-for="(judge, i) in group.judges"
-                :key="i"
+                :key="`collapsed-${i}`"
                 :color="judge.customRole?.color || '#409eff'"
                 effect="dark"
                 size="small"
@@ -229,78 +334,17 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
               </el-tag>
             </div>
           </div>
-
-          <!-- QR 码 -->
-          <div v-if="group.qrcodeUrl" class="public-qrcode">
-            <div class="public-section-label">群二维码</div>
-            <img
-              :src="group.qrcodeUrl"
-              class="public-qrcode-img"
-              style="cursor: pointer"
-              @click="previewUrl = group.qrcodeUrl"
-            />
-            <el-button size="small" text type="primary" style="margin-top: 4px" @click="downloadQrcode(group.qrcodeUrl, group.name)">下载二维码</el-button>
-          </div>
-
-          <!-- 学生列表 -->
-          <div v-if="group.students?.length" class="public-students">
-            <div class="public-section-label">学生名单</div>
-            <div class="public-students-grid">
-              <article
-                v-for="student in group.students"
-                :key="student.id"
-                class="public-student-card"
-                :style="{
-                  background: roleTheme(student.customRole).cardBg,
-                  borderColor: roleTheme(student.customRole).border,
-                }"
-              >
-                <div class="public-student-card-top">
-                  <div class="public-student-main">
-                    <span class="public-student-no">#{{ student.orderNo }}</span>
-                    <span class="public-student-name">{{ student.name }}</span>
-                  </div>
-                  <span
-                    class="public-student-role"
-                    :style="{
-                      background: roleTheme(student.customRole).chipBg,
-                      color: roleTheme(student.customRole).chipText,
-                    }"
-                  >
-                    {{ student.customRole?.name || "普通成员" }}
-                  </span>
-                </div>
-
-                <div class="public-student-meta">
-                  <span>学号：{{ student.studentNo || "—" }}</span>
-                  <span>班级：{{ student.className || "—" }}</span>
-                </div>
-
-                <div class="public-student-desc" v-if="student.customRole?.description">
-                  {{ student.customRole.description }}
-                </div>
-              </article>
-            </div>
-          </div>
         </div>
       </template>
 
       <!-- ========= 评分标准 ========= -->
       <template v-if="section === 'scoring'">
-        <div class="public-page-header glass-panel">
-          <div class="public-page-title">
-            <el-icon :size="18" color="var(--primary)"><Notebook /></el-icon>
-            <span>评分标准</span>
-          </div>
-        </div>
-
         <div v-if="!activeTemplate" class="glass-panel" style="padding: 30px; text-align: center; color: var(--muted)">
           暂未设置评分模板
         </div>
 
         <div v-if="activeTemplate" class="public-template-card glass-panel">
-          <h3 class="public-template-name">{{ activeTemplate.name }}</h3>
-          <el-table :data="activeTemplate.items" class="public-table" stripe size="default" :show-overflow-tooltip="true">
+          <el-table :data="activeTemplate.items" class="public-table public-table-desktop" stripe size="default" :show-overflow-tooltip="true">
             <el-table-column label="序号" type="index" width="56" align="center" />
             <el-table-column label="评分项" prop="name" min-width="110" />
             <el-table-column label="满分" prop="maxScore" width="76" align="center" />
@@ -311,18 +355,30 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
               </template>
             </el-table-column>
           </el-table>
+
+          <div class="public-template-mobile-list">
+            <article
+              v-for="(item, index) in activeTemplate.items"
+              :key="item.id"
+              class="public-template-item-card"
+            >
+              <div class="public-template-item-top">
+                  <div class="public-template-item-index">#{{ Number(index) + 1 }}</div>
+                <div class="public-template-item-main">
+                  <div class="public-template-item-name">{{ item.name }}</div>
+                  <div class="public-template-item-score">满分 {{ item.maxScore }}</div>
+                </div>
+              </div>
+              <div class="public-template-item-desc">
+                {{ item.description || "暂无说明" }}
+              </div>
+            </article>
+          </div>
         </div>
       </template>
 
       <!-- ========= 角色职责 ========= -->
       <template v-if="section === 'roles'">
-        <div class="public-page-header glass-panel">
-          <div class="public-page-title">
-            <el-icon :size="18" color="var(--primary)"><UserFilled /></el-icon>
-            <span>角色职责</span>
-          </div>
-        </div>
-
         <div v-if="!activity.customRoles?.length" class="glass-panel" style="padding: 30px; text-align: center; color: var(--muted)">
           暂未设置活动角色
         </div>
@@ -341,13 +397,6 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
 
       <!-- ========= 活动公告 ========= -->
       <template v-if="section === 'announcement'">
-        <div class="public-page-header glass-panel">
-          <div class="public-page-title">
-            <el-icon :size="18" color="var(--primary)"><InfoFilled /></el-icon>
-            <span>活动公告</span>
-          </div>
-        </div>
-
         <div v-if="!activity.announcement && (!activity.announcementFiles || !activity.announcementFiles.length)" class="glass-panel" style="padding: 30px; text-align: center; color: var(--muted)">
           暂无公告
         </div>
@@ -360,17 +409,31 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   </AppShell>
 
   <Teleport to="body">
-    <div v-if="previewUrl" class="qr-preview-overlay" @click="previewUrl = ''">
-      <img :src="previewUrl" class="qr-preview-img" @click.stop />
-      <button class="qr-preview-close" @click="previewUrl = ''">&times;</button>
+    <div v-if="previewQrcode" class="qr-preview-overlay" @click="previewQrcode = null">
+      <div class="qr-preview-panel" @click.stop>
+        <img :src="previewQrcode.url" class="qr-preview-img" />
+        <div class="qr-preview-actions">
+          <el-button type="primary" size="small" @click="downloadQrcode(previewQrcode.url, previewQrcode.name)">下载二维码</el-button>
+        </div>
+      </div>
+      <button class="qr-preview-close" @click="previewQrcode = null">&times;</button>
     </div>
   </Teleport>
 </template>
 
 <style scoped>
 .public-search-bar {
-  padding: 10px 14px;
+  padding: 0;
   margin-bottom: 10px;
+}
+
+.public-search-bar :deep(.el-input__wrapper) {
+  min-height: 42px;
+  padding: 0 12px !important;
+  border-radius: 10px !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  border: 1px solid rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 10px 24px rgba(72, 92, 148, 0.08);
 }
 .public-search-hint {
   margin-top: 6px;
@@ -399,18 +462,47 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
 }
 
 .public-group-card {
+  position: relative;
   padding: 14px;
   margin-bottom: 10px;
 }
 
 .public-group-header {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+}
+
+.public-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0;
+  padding-right: 96px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.public-group-title-block {
+  min-width: 0;
 }
 
 .public-group-name {
   margin: 0 0 6px;
   font-size: 15px;
   font-weight: 700;
+}
+
+.public-group-body {
+  display: grid;
+  gap: 10px;
+}
+
+.public-group-collapsed-judges {
+  margin-top: 8px;
 }
 
 .public-group-meta {
@@ -437,8 +529,12 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   margin-bottom: 6px;
 }
 
+.public-section-label-inline {
+  margin-bottom: 0;
+}
+
 .public-judges {
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .public-judge-tags {
@@ -448,13 +544,23 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
 }
 
 .public-qrcode {
-  margin-bottom: 10px;
+  margin-bottom: 0;
+}
+
+.public-qrcode-corner {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
 }
 
 .public-qrcode-img {
-  width: 120px;
-  height: 120px;
-  border-radius: 6px;
+  width: 64px;
+  height: 64px;
+  border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.88);
   object-fit: contain;
   background: #fff;
@@ -470,13 +576,27 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   justify-content: center;
 }
 
+.qr-preview-panel {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.24);
+}
+
 .qr-preview-img {
   max-width: 88vw;
-  max-height: 88vh;
+  max-height: min(72vh, 560px);
   object-fit: contain;
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.qr-preview-actions {
+  display: flex;
+  justify-content: center;
 }
 
 .qr-preview-close {
@@ -501,6 +621,21 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   margin-top: 6px;
 }
 
+.public-students-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
 .public-students-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -512,6 +647,10 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   border-radius: 10px;
   padding: 10px;
   min-height: 92px;
+}
+
+.public-student-card-wide {
+  grid-column: 1 / -1;
 }
 
 .public-student-card-top {
@@ -616,10 +755,62 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
   margin-bottom: 10px;
 }
 
-.public-template-name {
-  margin: 0 0 10px;
-  font-size: 15px;
+.public-template-mobile-list {
+  display: none;
+}
+
+.public-template-item-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+}
+
+.public-template-item-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.public-template-item-index {
+  flex: 0 0 auto;
+  min-width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(64, 158, 255, 0.1);
+  color: #2f80ed;
+  font-size: 12px;
   font-weight: 700;
+}
+
+.public-template-item-main {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.public-template-item-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.public-template-item-score {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.public-template-item-desc {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* 角色职责 */
@@ -708,12 +899,77 @@ function roleTheme(role?: { name?: string; color?: string } | null) {
 }
 
 @media (max-width: 600px) {
+  .public-table-desktop {
+    display: none !important;
+  }
+
+  .public-template-mobile-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .public-search-bar {
+    position: fixed;
+    left: 50%;
+    width: min(320px, calc(100vw - 36px));
+    transform: translateX(-50%);
+    bottom: calc(62px + env(safe-area-inset-bottom));
+    z-index: 11;
+    margin-bottom: 0;
+  }
+
+  .public-search-bar-spacer {
+    display: block;
+    height: 74px;
+  }
+
+  .public-group-header {
+    margin-bottom: 8px;
+  }
+
+  .public-group-toggle {
+    padding-right: 74px;
+  }
+
+  .public-qrcode-img {
+    width: 56px;
+    height: 56px;
+  }
+
   .public-roles-grid {
     grid-template-columns: 1fr;
   }
 
   .public-students-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
+
+  .public-student-card-wide {
+    grid-column: 1 / -1;
+  }
+
+  .public-student-card {
+    padding: 8px;
+    min-height: 84px;
+  }
+
+  .public-student-name {
+    font-size: 14px;
+  }
+
+  .public-student-role {
+    font-size: 11px;
+    padding: 2px 7px;
+  }
+
+  .public-student-meta,
+  .public-student-desc {
+    font-size: 11px;
+  }
+}
+
+.public-search-bar-spacer {
+  display: none;
 }
 </style>

@@ -87,6 +87,10 @@ body::after {
   padding-top: 60px;
 }
 
+.page-shell-public {
+  padding-top: 62px;
+}
+
 .glass-panel {
   background: rgba(255, 255, 255, 0.42);
   border: 1px solid rgba(255, 255, 255, 0.88);
@@ -120,6 +124,12 @@ body::after {
   z-index: 20;
 }
 
+.page-shell-public .topbar {
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
 .topbar-logo {
   width: 34px;
   height: 34px;
@@ -133,6 +143,12 @@ body::after {
   height: 34px;
   display: block;
   object-fit: contain;
+}
+
+.page-shell-public .topbar-logo,
+.page-shell-public .topbar-logo-image {
+  width: 38px;
+  height: 38px;
 }
 
 .topbar-info {
@@ -161,6 +177,11 @@ body::after {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.page-shell-public .topbar-system-name {
+  font-size: 16px;
+  line-height: 1.2;
 }
 
 .topbar-activity {
@@ -271,6 +292,14 @@ body::after {
   border-color: rgba(245, 108, 108, 0.28) !important;
   background: rgba(245, 108, 108, 0.1) !important;
   color: var(--danger) !important;
+}
+
+.page-shell-public .topbar-exit-button.el-button {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 14px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
 }
 
 .topbar-exit-button.el-button:hover,
@@ -584,16 +613,26 @@ body::after {
   left: 0;
   right: 0;
   bottom: 0;
+  overflow: hidden;
   z-index: 10;
   display: flex;
   gap: 4px;
   width: 100%;
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.8);
-  border-top: 1px solid rgba(255, 255, 255, 0.92);
-  box-shadow: 0 -4px 18px rgba(72, 92, 148, 0.08);
-  backdrop-filter: blur(22px);
+  background: rgba(255, 255, 255, 0.66);
+  border-top: 1px solid rgba(255, 255, 255, 0.88);
+  box-shadow: 0 -10px 28px rgba(72, 92, 148, 0.12);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+}
+
+.dock::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
+  pointer-events: none;
 }
 
 .dock-item {
@@ -1264,6 +1303,33 @@ body::after {
   max-width: 100%;
   flex-wrap: wrap;
   row-gap: 6px;
+}
+
+.admin-results-scroll {
+  min-height: 0;
+}
+
+.results-backtop-button.el-button {
+  position: fixed;
+  right: 14px;
+  bottom: 70px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.58) !important;
+  background: rgba(64, 158, 255, 0.48) !important;
+  box-shadow: 0 8px 18px rgba(64, 158, 255, 0.18) !important;
+  backdrop-filter: blur(14px);
+  z-index: 18;
+}
+
+.results-backtop-button.el-button:hover,
+.results-backtop-button.el-button:focus {
+  background: rgba(64, 158, 255, 0.62) !important;
+  transform: translateY(-1px);
 }
 
 .admin-online-table.el-table {
@@ -1985,6 +2051,10 @@ body::after {
     padding-top: 58px;
   }
 
+  .page-shell-public {
+    padding-top: 70px;
+  }
+
   .stats-row {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
@@ -2046,6 +2116,12 @@ body::after {
     gap: 6px;
   }
 
+  .page-shell-public .topbar {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    padding: 9px 8px;
+    gap: 8px;
+  }
+
   .page-shell {
     padding-top: 66px;
   }
@@ -2054,14 +2130,28 @@ body::after {
     padding-top: 54px;
   }
 
+  .page-shell-public {
+    padding-top: 60px;
+  }
+
   .topbar-logo,
   .topbar-logo-image {
     width: 28px;
     height: 28px;
   }
 
+  .page-shell-public .topbar-logo,
+  .page-shell-public .topbar-logo-image {
+    width: 30px;
+    height: 30px;
+  }
+
   .topbar-welcome {
     font-size: 12px;
+  }
+
+  .page-shell-public .topbar-system-name {
+    font-size: 15px;
   }
 
   .topbar-activity,
@@ -2083,6 +2173,14 @@ body::after {
     min-height: 24px !important;
     padding: 0 8px !important;
     line-height: 22px !important;
+  }
+
+  .page-shell-public .topbar-exit-button.el-button {
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 10px !important;
+    line-height: 26px !important;
+    font-size: 11px !important;
   }
 
   .judge-activity-meta {
@@ -2115,5 +2213,14 @@ body::after {
     justify-content: center;
     --el-pagination-button-width: 28px;
     --el-pagination-button-height: 28px;
+  }
+
+  .results-backtop-button.el-button {
+    right: 12px;
+    bottom: 68px;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    min-height: 28px;
   }
 }

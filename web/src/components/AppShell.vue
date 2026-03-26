@@ -87,7 +87,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div :class="['page-shell', mode === 'admin' ? 'page-shell-admin' : 'page-shell-judge']">
+  <div :class="['page-shell', mode === 'admin' ? 'page-shell-admin' : mode === 'public' ? 'page-shell-public' : 'page-shell-judge']">
     <section class="glass-panel topbar">
       <div class="topbar-logo">
         <img :src="logoUrl" alt="logo" class="topbar-logo-image" />
@@ -109,7 +109,7 @@ onUnmounted(() => {
       </div>
       <div class="topbar-exit">
         <template v-if="mode === 'public'">
-          <el-button type="primary" size="small" plain :icon="Reading" @click="router.push('/login')">评分登录</el-button>
+          <el-button type="primary" size="small" plain :icon="Reading" @click="router.push('/login')">评委入口</el-button>
         </template>
         <template v-else-if="mode === 'admin'">
           <div class="topbar-admin-welcome">欢迎您，管理员</div>
