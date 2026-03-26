@@ -6,7 +6,8 @@ export function useModalHistory(
   key = "modal",
 ) {
   let pushed = false;
-  let syncing = false;
+  let closingFromPopstate = false;
+  let ignoreNextPopstate = false;
 
   function pushEntry() {
     if (typeof window === "undefined") return;
@@ -21,29 +22,24 @@ export function useModalHistory(
     pushed = true;
   }
 
-  function finishSyncSoon() {
-    window.setTimeout(() => {
-      syncing = false;
-    }, 0);
-  }
-
   async function handlePopState() {
-    if (syncing) {
-      syncing = false;
+    if (ignoreNextPopstate) {
+      ignoreNextPopstate = false;
       return;
     }
 
     if (!pushed) return;
 
+    closingFromPopstate = true;
     const closed = await requestClose();
     if (closed === false) {
+      closingFromPopstate = false;
       pushEntry();
       return;
     }
 
     pushed = false;
-    syncing = true;
-    finishSyncSoon();
+    closingFromPopstate = false;
   }
 
   watch(visible, (open) => {
@@ -54,11 +50,16 @@ export function useModalHistory(
       return;
     }
 
-    if (!open && pushed && !syncing) {
+    if (!open && pushed) {
+      if (closingFromPopstate) {
+        pushed = false;
+        closingFromPopstate = false;
+        return;
+      }
+
       pushed = false;
-      syncing = true;
+      ignoreNextPopstate = true;
       window.history.back();
-      finishSyncSoon();
     }
   });
 
