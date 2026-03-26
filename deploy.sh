@@ -10,6 +10,7 @@ SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 NPM_INSTALL_CMD="${NPM_INSTALL_CMD:-npm ci}"
 USE_PM2="${USE_PM2:-0}"
 RESTART_CMD="${RESTART_CMD:-}"
+ENV_FILE="$ROOT_DIR/server/.env"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
@@ -20,6 +21,32 @@ require_cmd() {
     echo "缺少命令：$1"
     exit 1
   fi
+}
+
+resolve_db_path() {
+  local default_db="$ROOT_DIR/server/prisma/dev.db"
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "$default_db"
+    return
+  fi
+
+  local database_url
+  database_url="$(grep -E '^DATABASE_URL=' "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  database_url="${database_url%\"}"
+  database_url="${database_url#\"}"
+
+  if [[ -z "$database_url" || "$database_url" != file:* ]]; then
+    echo "$default_db"
+    return
+  fi
+
+  local db_target="${database_url#file:}"
+  if [[ "$db_target" = /* ]]; then
+    echo "$db_target"
+    return
+  fi
+
+  echo "$(cd "$ROOT_DIR/server" && realpath -m "$db_target")"
 }
 
 require_cmd npm
@@ -40,11 +67,12 @@ if [[ "$SKIP_GIT_PULL" != "1" ]]; then
   git pull --ff-only origin "$current_branch"
 fi
 
-if [[ "$BACKUP_DB" == "1" && -f "$ROOT_DIR/server/prisma/dev.db" ]]; then
-  backup_dir="$ROOT_DIR/server/prisma/backups"
+db_file="$(resolve_db_path)"
+if [[ "$BACKUP_DB" == "1" && -f "$db_file" ]]; then
+  backup_dir="$(dirname "$db_file")/backups"
   backup_file="$backup_dir/dev-$(date '+%Y%m%d%H%M%S').db"
   mkdir -p "$backup_dir"
-  cp "$ROOT_DIR/server/prisma/dev.db" "$backup_file"
+  cp "$db_file" "$backup_file"
   log "已备份数据库到 $backup_file"
 fi
 

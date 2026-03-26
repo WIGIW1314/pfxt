@@ -41,13 +41,26 @@ function resolveExistingPath(candidates: string[]) {
   return candidates[0];
 }
 
+function compactPaths(items: Array<string | undefined>) {
+  return items.filter((item): item is string => Boolean(item && item.trim()));
+}
+
 const currentFileDir = path.dirname(fileURLToPath(import.meta.url));
-const SIGNATURE_DIR = resolveExistingPath([
+const PRIVATE_ASSETS_DIR = process.env.PRIVATE_ASSETS_DIR?.trim();
+const SIGNATURE_DIR = resolveExistingPath(compactPaths([
+  process.env.SIGNATURE_DIR ? path.resolve(process.env.SIGNATURE_DIR) : undefined,
+  PRIVATE_ASSETS_DIR ? path.resolve(PRIVATE_ASSETS_DIR, "签名") : undefined,
+  path.resolve(process.cwd(), "../pfxt-private/签名"),
+  path.resolve(process.cwd(), "private/签名"),
   path.resolve(process.cwd(), "web/public/签名"),
   path.resolve(process.cwd(), "../web/public/签名"),
+  path.resolve(currentFileDir, "../../../pfxt-private/签名"),
+  path.resolve(currentFileDir, "../../../private/签名"),
   path.resolve(currentFileDir, "../../../web/public/签名"),
+  path.resolve(currentFileDir, "../../../../pfxt-private/签名"),
+  path.resolve(currentFileDir, "../../../../private/签名"),
   path.resolve(currentFileDir, "../../../../web/public/签名"),
-]);
+]));
 const PDF_FONT_PATH = [
   "C:\\Windows\\Fonts\\msyh.ttc",
   "C:\\Windows\\Fonts\\msyh.ttf",
@@ -55,12 +68,20 @@ const PDF_FONT_PATH = [
   "C:\\Windows\\Fonts\\simsun.ttc",
 ].find((item) => fsSync.existsSync(item));
 
-const DOCX_TEMPLATE_PATH = resolveExistingPath([
+const DOCX_TEMPLATE_PATH = resolveExistingPath(compactPaths([
+  process.env.DOCX_TEMPLATE_PATH ? path.resolve(process.env.DOCX_TEMPLATE_PATH) : undefined,
+  PRIVATE_ASSETS_DIR ? path.resolve(PRIVATE_ASSETS_DIR, "微格教学技能评价表.docx") : undefined,
+  path.resolve(process.cwd(), "../pfxt-private/微格教学技能评价表.docx"),
+  path.resolve(process.cwd(), "private/微格教学技能评价表.docx"),
   path.resolve(process.cwd(), "web/public/微格教学技能评价表.docx"),
   path.resolve(process.cwd(), "../web/public/微格教学技能评价表.docx"),
+  path.resolve(currentFileDir, "../../../pfxt-private/微格教学技能评价表.docx"),
+  path.resolve(currentFileDir, "../../../private/微格教学技能评价表.docx"),
   path.resolve(currentFileDir, "../../../web/public/微格教学技能评价表.docx"),
+  path.resolve(currentFileDir, "../../../../pfxt-private/微格教学技能评价表.docx"),
+  path.resolve(currentFileDir, "../../../../private/微格教学技能评价表.docx"),
   path.resolve(currentFileDir, "../../../../web/public/微格教学技能评价表.docx"),
-]);
+]));
 
 function normalizeAiComment(raw: string) {
   const compact = String(raw || "")
