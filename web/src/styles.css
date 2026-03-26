@@ -32,7 +32,9 @@
 }
 
 body.el-popup-parent--hidden .page-shell,
-body:has(.qr-preview-overlay) .page-shell {
+body.el-popup-parent--hidden .page-shell *,
+body:has(.qr-preview-overlay) .page-shell,
+body:has(.qr-preview-overlay) .page-shell * {
   pointer-events: none;
 }
 
