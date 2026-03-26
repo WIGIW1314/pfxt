@@ -31,10 +31,10 @@
   object-fit: contain !important;
 }
 
-body.el-popup-parent--hidden .page-shell,
-body.el-popup-parent--hidden .page-shell *,
-body:has(.qr-preview-overlay) .page-shell,
-body:has(.qr-preview-overlay) .page-shell * {
+body.el-popup-parent--hidden .page-shell > :not(.el-overlay),
+body.el-popup-parent--hidden .page-shell > :not(.el-overlay) *,
+body:has(.qr-preview-overlay) .page-shell > :not(.el-overlay),
+body:has(.qr-preview-overlay) .page-shell > :not(.el-overlay) * {
   pointer-events: none;
 }
 
