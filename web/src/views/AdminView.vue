@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Setting, Upload, UserFilled } from "@element-plus/icons-vue";
@@ -138,8 +138,15 @@ async function withDialogSubmit(fn: () => Promise<void>) {
   }
 }
 const mobileDialog = computed(() => window.innerWidth < 768);
+const isCompactResultPagination = ref(typeof window !== "undefined" ? window.innerWidth <= 560 : false);
 const resultCurrentPage = ref(1);
 const resultPageSize = ref(24);
+const resultPaginationLayout = computed(() =>
+  isCompactResultPagination.value ? "prev, pager, next" : "total, sizes, prev, pager, next, jumper",
+);
+const resultPaginationSizes = computed(() =>
+  isCompactResultPagination.value ? [12, 24, 48] : [12, 24, 48, 96],
+);
 const paginatedResults = computed(() => {
   const start = (resultCurrentPage.value - 1) * resultPageSize.value;
   return results.value.slice(start, start + resultPageSize.value);
@@ -147,6 +154,11 @@ const paginatedResults = computed(() => {
 watch(results, () => {
   resultCurrentPage.value = 1;
 });
+
+function syncResponsiveState() {
+  if (typeof window === "undefined") return;
+  isCompactResultPagination.value = window.innerWidth <= 560;
+}
 function formatDecimalScore(val: any) {
   if (val == null || val === "" || isNaN(val)) return "-";
   const places = currentActivity.value?.avgDecimalPlaces ?? 2;
@@ -1576,7 +1588,17 @@ watch(
   },
 );
 
-onMounted(fetchAll);
+onMounted(() => {
+  syncResponsiveState();
+  window.addEventListener("resize", syncResponsiveState);
+  fetchAll();
+});
+
+onUnmounted(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", syncResponsiveState);
+  }
+});
 </script>
 
 <template>
@@ -2280,13 +2302,15 @@ onMounted(fetchAll);
           </template>
           <el-empty v-else description="暂无评分数据" />
         </div>
-        <div style="display: flex; justify-content: flex-end; margin-top: 12px; flex-shrink: 0;">
+        <div class="results-pagination-wrap">
           <el-pagination
+            class="results-pagination"
             v-model:current-page="resultCurrentPage"
             v-model:page-size="resultPageSize"
-            :page-sizes="[12, 24, 48, 96]"
-            layout="total, sizes, prev, pager, next, jumper"
+            :page-sizes="resultPaginationSizes"
+            :layout="resultPaginationLayout"
             :total="results.length"
+            :small="isCompactResultPagination"
           />
         </div>
       </section>

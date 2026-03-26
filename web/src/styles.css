@@ -1238,6 +1238,20 @@ body::after {
   word-break: break-word;
 }
 
+.results-pagination-wrap {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.results-pagination.el-pagination {
+  max-width: 100%;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
 .admin-online-table.el-table {
   flex: 1 1 auto;
   min-height: 0;
@@ -1833,5 +1847,15 @@ body::after {
 
   .stats-row .stat-value {
     font-size: 16px;
+  }
+
+  .results-pagination-wrap {
+    justify-content: center;
+  }
+
+  .results-pagination.el-pagination {
+    justify-content: center;
+    --el-pagination-button-width: 28px;
+    --el-pagination-button-height: 28px;
   }
 }
