@@ -30,6 +30,7 @@ const auth = useAuthStore();
 const sync = useSyncStore();
 const router = useRouter();
 const route = useRoute();
+const logoUrl = "/api/assets/logo.svg";
 
 const adminItems = [
   { label: "看板", path: "/admin/dashboard", icon: DataBoard },
@@ -89,7 +90,7 @@ onUnmounted(() => {
   <div :class="['page-shell', mode === 'admin' ? 'page-shell-admin' : 'page-shell-judge']">
     <section class="glass-panel topbar">
       <div class="topbar-logo">
-        <img src="/logo.svg" alt="logo" class="topbar-logo-image" />
+        <img :src="logoUrl" alt="logo" class="topbar-logo-image" />
       </div>
       <div class="topbar-info">
         <template v-if="mode === 'public'">

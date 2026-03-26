@@ -10,6 +10,7 @@ const auth = useAuthStore();
 const sync = useSyncStore();
 const router = useRouter();
 const loading = ref(false);
+const logoUrl = "/api/assets/logo.svg";
 const form = reactive({
   username: "",
   password: "",
@@ -33,7 +34,7 @@ async function submit() {
   <div class="page-shell" style="display: grid; place-items: center; padding-bottom: 24px">
     <section class="glass-panel" style="width: min(420px, 100%); padding: 22px">
       <div style="margin-bottom: 18px; display: flex; align-items: center; gap: 10px">
-        <img src="/logo.svg" alt="logo" style="width: 38px; height: 38px" />
+        <img :src="logoUrl" alt="logo" style="width: 38px; height: 38px" />
         <h1 style="margin: 0">线上评分系统</h1>
       </div>
 

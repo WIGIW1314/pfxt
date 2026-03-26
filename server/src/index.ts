@@ -24,6 +24,16 @@ if (!jwtSecret || jwtSecret.length < 32) {
 }
 
 const allowedOrigin = process.env.CORS_ORIGIN;
+const privateAssetsDir = process.env.PRIVATE_ASSETS_DIR?.trim();
+
+function resolveExistingPath(candidates: Array<string | undefined>) {
+  for (const item of candidates) {
+    if (item && fsSync.existsSync(item)) {
+      return item;
+    }
+  }
+  return candidates.find(Boolean);
+}
 
 app.setErrorHandler((error, _request, reply) => {
   const message = error instanceof Error ? error.message : "请求失败";
@@ -48,11 +58,30 @@ const serverDir = path.basename(path.resolve(__dir, "..")) === "dist"
   ? path.resolve(__dir, "..", "..")
   : path.resolve(__dir, "..");
 const uploadsDir = path.resolve(serverDir, "uploads");
+const logoPath = resolveExistingPath([
+  process.env.LOGO_PATH ? path.resolve(process.env.LOGO_PATH) : undefined,
+  privateAssetsDir ? path.resolve(privateAssetsDir, "logo.svg") : undefined,
+  path.resolve(process.cwd(), "../pfxt-private/logo.svg"),
+  path.resolve(process.cwd(), "private/logo.svg"),
+  path.resolve(process.cwd(), "web/public/logo.svg"),
+  path.resolve(process.cwd(), "../web/public/logo.svg"),
+  path.resolve(serverDir, "../private/logo.svg"),
+  path.resolve(serverDir, "../web/public/logo.svg"),
+]);
 if (!fsSync.existsSync(uploadsDir)) fsSync.mkdirSync(uploadsDir, { recursive: true });
 await app.register(fastifyStatic, {
   root: uploadsDir,
   prefix: "/api/uploads/",
   decorateReply: false,
+});
+
+app.get("/api/assets/logo.svg", async (_request, reply) => {
+  if (!logoPath || !fsSync.existsSync(logoPath)) {
+    return reply.code(404).send({ message: "logo not found" });
+  }
+  reply.header("Cache-Control", "public, max-age=3600");
+  reply.type("image/svg+xml");
+  return reply.send(fsSync.createReadStream(logoPath));
 });
 
 await ensureRuntimeSchema();
