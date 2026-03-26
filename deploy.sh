@@ -3,6 +3,17 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$ROOT_DIR/.deploy.env}"
+RESTART_SCRIPT="${RESTART_SCRIPT:-$ROOT_DIR/restart-server.sh}"
+
+if [[ -f "$DEPLOY_ENV_FILE" ]]; then
+  # 允许服务器在仓库外逻辑不变的前提下，本地覆盖部署变量，例如 RESTART_CMD。
+  set -a
+  # shellcheck disable=SC1090
+  source "$DEPLOY_ENV_FILE"
+  set +a
+fi
+
 APP_NAME="${APP_NAME:-pfxt-server}"
 BACKUP_DB="${BACKUP_DB:-1}"
 RUN_DB_PUSH="${RUN_DB_PUSH:-0}"
@@ -90,6 +101,9 @@ fi
 if [[ -n "$RESTART_CMD" ]]; then
   log "执行自定义重启命令"
   eval "$RESTART_CMD"
+elif [[ -x "$RESTART_SCRIPT" ]]; then
+  log "执行重启脚本：$RESTART_SCRIPT"
+  "$RESTART_SCRIPT"
 elif [[ "$USE_PM2" == "1" ]]; then
   require_cmd pm2
   if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
@@ -101,7 +115,7 @@ elif [[ "$USE_PM2" == "1" ]]; then
   fi
   pm2 save
 else
-  log "构建已完成。当前未启用 PM2，请到宝塔 Node 项目中执行重启，或设置 RESTART_CMD。"
+  log "构建已完成。当前未启用 PM2，请到宝塔 Node 项目中执行重启，或配置 .deploy.env / restart-server.sh。"
 fi
 
 log "部署完成"

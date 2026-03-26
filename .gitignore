@@ -9,6 +9,8 @@ server/.env
 server/prisma/dev.db
 server/prisma/backups/
 server/uploads/
+.deploy.env
+restart-server.sh
 
 web/public/签名/
 web/public/微格教学技能评价表.docx
