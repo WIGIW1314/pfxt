@@ -431,9 +431,16 @@ function hasRoleDuty(student: any) {
   min-height: 42px;
   padding: 0 12px !important;
   border-radius: 10px !important;
-  background: rgba(255, 255, 255, 0.82) !important;
+  background: rgba(255, 255, 255, 0.68) !important;
   border: 1px solid rgba(255, 255, 255, 0.9) !important;
   box-shadow: 0 10px 24px rgba(72, 92, 148, 0.08);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.public-search-bar :deep(.el-input__wrapper.is-focus) {
+  background: rgba(255, 255, 255, 0.76) !important;
+  box-shadow: 0 0 0 1px rgba(64, 158, 255, 0.18), 0 10px 24px rgba(72, 92, 148, 0.12);
 }
 .public-search-hint {
   margin-top: 6px;
