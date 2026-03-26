@@ -3,12 +3,22 @@ setlocal
 
 cd /d "%~dp0"
 
+set "http_proxy=http://127.0.0.1:10808"
+set "https_proxy=http://127.0.0.1:10808"
+set "all_proxy=socks5://127.0.0.1:10808"
+set "HTTP_PROXY=http://127.0.0.1:10808"
+set "HTTPS_PROXY=http://127.0.0.1:10808"
+set "ALL_PROXY=socks5://127.0.0.1:10808"
+
 where git >nul 2>nul
 if errorlevel 1 goto no_git
 
 git rev-parse --is-inside-work-tree >nul 2>nul
 if errorlevel 1 goto no_repo
 
+echo.
+echo ==== Proxy Enabled ====
+echo http_proxy=%http_proxy%
 echo.
 echo ==== Git Status ====
 git status --short
