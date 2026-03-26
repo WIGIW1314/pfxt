@@ -14,12 +14,12 @@ if [[ -f "$DEPLOY_ENV_FILE" ]]; then
   set +a
 fi
 
-APP_NAME="${APP_NAME:-pfxt-server}"
+APP_NAME="${APP_NAME:-pfxt_wghappy_cn}"
 BACKUP_DB="${BACKUP_DB:-1}"
 RUN_DB_PUSH="${RUN_DB_PUSH:-0}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 NPM_INSTALL_CMD="${NPM_INSTALL_CMD:-npm ci}"
-USE_PM2="${USE_PM2:-0}"
+USE_PM2="${USE_PM2:-1}"
 RESTART_CMD="${RESTART_CMD:-}"
 ENV_FILE="$ROOT_DIR/server/.env"
 
