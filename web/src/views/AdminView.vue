@@ -8,6 +8,7 @@ import { api, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { formatBJ } from "../date";
 import { useSyncStore } from "../stores/sync";
+import { useModalHistory } from "../composables/useModalHistory";
 import type { Activity, ActivityCustomRole, Group, ScoreTemplate, Student } from "../types";
 
 const ImportDialog = defineAsyncComponent(() => import("../components/ImportDialog.vue"));
@@ -305,6 +306,17 @@ const passwordForm = reactive({
 });
 const passwordLoading = ref(false);
 
+function bindSimpleModalHistory(source: { value: boolean }, key: string) {
+  useModalHistory(
+    () => source.value,
+    async () => {
+      source.value = false;
+      return true;
+    },
+    key,
+  );
+}
+
 function openPasswordDialog() {
   passwordForm.oldPassword = '';
   passwordForm.newPassword = '';
@@ -348,6 +360,19 @@ const announcementContent = ref("");
 const announcementFiles = ref<Array<{ name: string; url: string; type: string; description?: string }>>([]);
 const announcementSaving = ref(false);
 const announcementUploading = ref(false);
+
+bindSimpleModalHistory(passwordDialog, "admin-password-dialog");
+bindSimpleModalHistory(activityDialog, "admin-activity-dialog");
+bindSimpleModalHistory(announcementDialog, "admin-announcement-dialog");
+bindSimpleModalHistory(groupDialog, "admin-group-dialog");
+bindSimpleModalHistory(groupJudgeDialog, "admin-group-judge-dialog");
+bindSimpleModalHistory(studentDialog, "admin-student-dialog");
+bindSimpleModalHistory(judgeDialog, "admin-judge-dialog");
+bindSimpleModalHistory(logDialog, "admin-log-dialog");
+bindSimpleModalHistory(customRoleDialog, "admin-custom-role-dialog");
+bindSimpleModalHistory(studentImportOpen, "admin-student-import-dialog");
+bindSimpleModalHistory(judgeImportOpen, "admin-judge-import-dialog");
+bindSimpleModalHistory(groupImportOpen, "admin-group-import-dialog");
 
 function openAnnouncementEditor(activity: Activity) {
   announcementEditId.value = activity.id;

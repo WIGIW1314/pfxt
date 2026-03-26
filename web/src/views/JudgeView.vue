@@ -8,6 +8,7 @@ import { api, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { useSyncStore } from "../stores/sync";
 import { formatBJ } from "../date";
+import { useModalHistory } from "../composables/useModalHistory";
 import { distributeScore } from "../score-distribute";
 import type { ScoreTemplate, Student } from "../types";
 
@@ -42,6 +43,24 @@ const exportProgress = reactive({
   percent: 0,
 });
 let exportProgressTimer: number | undefined;
+
+useModalHistory(
+  () => peerScoreOpen.value,
+  async () => {
+    peerScoreOpen.value = false;
+    return true;
+  },
+  "judge-peer-scores",
+);
+
+useModalHistory(
+  () => exportProgress.visible,
+  async () => {
+    exportProgress.visible = false;
+    return true;
+  },
+  "judge-export-progress",
+);
 
 const activityId = computed(() => currentActivity.value?.activity?.id || auth.currentActivityRole?.activityId || "");
 const exportBaseName = computed(() => `${currentActivity.value?.group?.name || "本组"}成绩单`);

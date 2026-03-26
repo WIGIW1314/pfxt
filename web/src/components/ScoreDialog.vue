@@ -5,6 +5,7 @@ import { ArrowDown } from "@element-plus/icons-vue";
 import { api } from "../api";
 import { distributeScore } from "../score-distribute";
 import type { ScoreTemplate, Student } from "../types";
+import { useModalHistory } from "../composables/useModalHistory";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -126,8 +127,9 @@ async function confirmCloseIfNeeded() {
 }
 
 async function requestClose() {
-  if (!(await confirmCloseIfNeeded())) return;
+  if (!(await confirmCloseIfNeeded())) return false;
   emit("update:modelValue", false);
+  return true;
 }
 
 async function handleBeforeClose(done: () => void) {
@@ -135,6 +137,12 @@ async function handleBeforeClose(done: () => void) {
   done();
   emit("update:modelValue", false);
 }
+
+useModalHistory(
+  () => props.modelValue,
+  requestClose,
+  "score-dialog",
+);
 
 async function save(endpoint: "save-draft" | "submit-score") {
   if (!props.student || !props.template || props.readonly || saving.value) return;

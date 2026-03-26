@@ -14,6 +14,7 @@ import {
 import { api, API_BASE } from "../api";
 import { formatBJ } from "../date";
 import AppShell from "../components/AppShell.vue";
+import { useModalHistory } from "../composables/useModalHistory";
 
 const DocViewer = defineAsyncComponent(() => import("../components/DocViewer.vue"));
 const PUBLIC_REFRESH_EVENTS = new Set([
@@ -65,6 +66,15 @@ const matchCount = computed(() => {
   if (!keyword) return 0;
   return filteredGroups.value.reduce((sum: number, g: any) => sum + g.students.length, 0);
 });
+
+useModalHistory(
+  () => Boolean(previewQrcode.value),
+  async () => {
+    previewQrcode.value = null;
+    return true;
+  },
+  "public-qrcode-preview",
+);
 
 async function fetchData() {
   loading.value = true;

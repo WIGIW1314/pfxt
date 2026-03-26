@@ -4,6 +4,7 @@ import { UploadFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
 import { api, downloadFile } from "../api";
+import { useModalHistory } from "../composables/useModalHistory";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -23,6 +24,15 @@ const file = ref<File | null>(null);
 const uploading = ref(false);
 const fullscreen = computed(() => window.innerWidth < 768);
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+useModalHistory(
+  () => props.modelValue,
+  async () => {
+    emit("update:modelValue", false);
+    return true;
+  },
+  `import-dialog-${props.title}`,
+);
 
 function handleFileChange(uploadFile: UploadFile) {
   const raw = uploadFile.raw || null;
