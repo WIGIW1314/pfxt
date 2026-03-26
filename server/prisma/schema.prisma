@@ -1,0 +1,259 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ACTIVITY_ADMIN
+  JUDGE
+  SECRETARY
+}
+
+enum ScoreStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum ActivityCalcMode {
+  SIMPLE_AVG
+  DROP_EXTREMES
+  WEIGHTED_AVG
+  ALL_SUBMITTED
+}
+
+model User {
+  id                  String             @id @default(cuid())
+  username            String             @unique
+  passwordHash        String
+  realName            String
+  role                UserRole
+  phone               String?
+  isActive            Boolean            @default(true)
+  forceChangePassword Boolean            @default(true)
+  lastLoginAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  activityRoles       ActivityUserRole[]
+  scores              Score[]
+  scoreAssignments    ScoreAssignment[]
+  createdActivities   Activity[]         @relation("ActivityCreator")
+  operationLogs       OperationLog[]
+}
+
+model Activity {
+  id                           String             @id @default(cuid())
+  name                         String
+  code                         String             @unique
+  description                  String?
+  type                         String
+  scoreMode                    String
+  activeTemplateId             String?
+  avgDecimalPlaces             Int                @default(2)
+  calcMode                     ActivityCalcMode   @default(SIMPLE_AVG)
+  isActive                     Boolean            @default(true)
+  isLocked                     Boolean            @default(false)
+  allowEditScore               Boolean            @default(true)
+  showAvgToJudge               Boolean            @default(false)
+  showPeerScoresToJudge        Boolean            @default(false)
+  showGroupProgressToSecretary Boolean            @default(true)
+  announcement                 String?
+  announcementFiles            String?            // JSON: [{name,path,type}]
+  startTime                    DateTime?
+  endTime                      DateTime?
+  createdBy                    String
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
+  creator                      User               @relation("ActivityCreator", fields: [createdBy], references: [id])
+  groups                       Group[]
+  students                     Student[]
+  templates                    ScoreTemplate[]
+  assignments                  ScoreAssignment[]
+  scores                       Score[]
+  activityRoles                ActivityUserRole[]
+  customRoles                  ActivityCustomRole[]
+}
+
+model ActivityCustomRole {
+  id          String             @id @default(cuid())
+  activityId  String
+  name        String
+  description String?
+  color       String?            @default("#409eff")
+  sortOrder   Int                @default(0)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  activity    Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  userRoles   ActivityUserRole[]
+  students    Student[]
+
+  @@unique([activityId, name])
+}
+
+model Group {
+  id            String             @id @default(cuid())
+  activityId    String
+  name          String
+  sortOrder     Int                @default(0)
+  location      String?
+  scheduleTime  DateTime?
+  isLocked      Boolean            @default(false)
+  startTime     DateTime?
+  endTime       DateTime?
+  qrcodeUrl     String?
+  note          String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  activity      Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  students      Student[]
+  activityRoles ActivityUserRole[]
+  scores        Score[]
+  assignments   ScoreAssignment[]
+
+  @@unique([activityId, name])
+  @@index([activityId, sortOrder])
+}
+
+model ActivityUserRole {
+  id         String   @id @default(cuid())
+  activityId String
+  userId     String
+  role       UserRole
+  groupId    String?
+  customRoleId String?
+  isPrimary  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group      Group?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  customRole ActivityCustomRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+
+  @@index([activityId, userId])
+  @@index([activityId, role, groupId])
+}
+
+model Student {
+  id          String            @id @default(cuid())
+  activityId  String
+  groupId     String
+  studentNo   String
+  name        String
+  gender      String?
+  className   String?
+  majorName   String?
+  mentorName  String?
+  phone       String?
+  email       String?
+  orderNo     Int               @default(0)
+  customRoleId String?
+  status      String            @default("PENDING")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  activity    Activity          @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  group       Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  customRole  ActivityCustomRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  assignments ScoreAssignment[]
+  scores      Score[]
+
+  @@unique([activityId, studentNo])
+  @@index([activityId, groupId, orderNo])
+}
+
+model ScoreTemplate {
+  id         String       @id @default(cuid())
+  activityId String
+  name       String
+  scoreMode  String
+  totalScore Float        @default(100)
+  isDefault  Boolean      @default(false)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  activity   Activity     @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  items      ScoreItem[]
+  scores     Score[]
+}
+
+model ScoreItem {
+  id          String        @id @default(cuid())
+  templateId  String
+  name        String
+  maxScore    Float
+  weight      Float         @default(1)
+  isRequired  Boolean       @default(true)
+  sortOrder   Int           @default(0)
+  description String?
+  template    ScoreTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  details     ScoreDetail[]
+}
+
+model ScoreAssignment {
+  id          String   @id @default(cuid())
+  activityId  String
+  studentId   String
+  judgeUserId String
+  groupId     String
+  isRequired  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  activity    Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  judge       User     @relation(fields: [judgeUserId], references: [id], onDelete: Cascade)
+  group       Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([activityId, studentId, judgeUserId])
+  @@index([activityId, judgeUserId])
+  @@index([activityId, studentId])
+}
+
+model Score {
+  id          String        @id @default(cuid())
+  activityId  String
+  studentId   String
+  judgeUserId String
+  groupId     String
+  templateId  String
+  totalScore  Float
+  status      ScoreStatus
+  comment     String?
+  submittedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  activity    Activity      @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  student     Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  judge       User          @relation(fields: [judgeUserId], references: [id], onDelete: Cascade)
+  group       Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  template    ScoreTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  details     ScoreDetail[]
+
+  @@unique([activityId, studentId, judgeUserId])
+  @@index([activityId, studentId, status])
+  @@index([activityId, judgeUserId, status])
+}
+
+model ScoreDetail {
+  id         String    @id @default(cuid())
+  scoreId    String
+  itemId     String
+  scoreValue Float
+  score      Score     @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+  item       ScoreItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+}
+
+model OperationLog {
+  id           String   @id @default(cuid())
+  operatorId   String?
+  operatorName String
+  module       String
+  action       String
+  targetType   String
+  targetId     String?
+  beforeData   String?
+  afterData    String?
+  createdAt    DateTime @default(now())
+  operator     User?    @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
