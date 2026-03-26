@@ -919,59 +919,63 @@ onBeforeRouteUpdate(async () => {
     </template>
 
     <template v-else-if="section === 'score'">
-      <section class="glass-panel judge-toolbar-panel" style="padding: 6px 8px; margin-bottom: 6px">
-        <div class="panel-header judge-toolbar-header">
-          <div class="judge-toolbar">
-            <el-input v-model="keyword" class="judge-toolbar-search" placeholder="搜索">
+      <section class="glass-panel judge-toolbar-panel">
+        <div class="judge-toolbar-shell">
+          <div class="judge-toolbar-search-block">
+            <div class="judge-toolbar-label">快速检索</div>
+            <el-input v-model="keyword" class="judge-toolbar-search" placeholder="搜索姓名、学号或班级">
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
+          </div>
+          <div class="judge-toolbar-action-block">
+            <div class="judge-toolbar-label">批量操作</div>
             <div class="judge-toolbar-actions">
-              <el-button class="judge-toolbar-button" :type="hasUnsavedChanges ? 'primary' : ''" :plain="!hasUnsavedChanges" :icon="EditPen" :disabled="isLocked" :loading="batchLoading === 'save-draft'" @click="saveBatch('save-draft')">
+              <el-button class="judge-toolbar-button judge-toolbar-button-save" :type="hasUnsavedChanges ? 'primary' : ''" :plain="!hasUnsavedChanges" :icon="EditPen" :disabled="isLocked" :loading="batchLoading === 'save-draft'" @click="saveBatch('save-draft')">
                 保存
               </el-button>
-              <el-button class="judge-toolbar-button" type="primary" :icon="UploadFilled" :disabled="isLocked" :loading="batchLoading === 'submit-score'" @click="saveBatch('submit-score')">
+              <el-button class="judge-toolbar-button judge-toolbar-button-submit" type="primary" :icon="UploadFilled" :disabled="isLocked" :loading="batchLoading === 'submit-score'" @click="saveBatch('submit-score')">
                 提交
               </el-button>
-              <el-button class="judge-toolbar-button" type="danger" plain :icon="Warning" :disabled="isLocked" :loading="batchLoading === 'reset-score'" @click="batchReset()">
+              <el-button class="judge-toolbar-button judge-toolbar-button-reset" type="danger" plain :icon="Warning" :disabled="isLocked" :loading="batchLoading === 'reset-score'" @click="batchReset()">
                 重置
               </el-button>
               <el-dropdown @command="handleExport">
-              <el-button class="judge-toolbar-button" plain :icon="Download" :disabled="exportProgress.visible">
-                导出
-                <el-icon style="margin-left: 4px"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item class="judge-export-item" command="evaluation-docx-zip">
-                    <el-icon color="#d35400"><Document /></el-icon>
-                    <span>导出教学评价表zip</span>
-                  </el-dropdown-item>
-                  <el-dropdown-item class="judge-export-item" command="xlsx">
-                    <el-icon color="#2f80ed"><Files /></el-icon>
-                    <span>导出为 xlsx</span>
-                  </el-dropdown-item>
-                  <el-dropdown-item class="judge-export-item" command="docx">
-                    <el-icon color="#f2994a"><Document /></el-icon>
-                    <span>导出为 docx</span>
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
+                <el-button class="judge-toolbar-button judge-toolbar-button-export" plain :icon="Download" :disabled="exportProgress.visible">
+                  导出
+                  <el-icon style="margin-left: 4px"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item class="judge-export-item" command="evaluation-docx-zip">
+                      <el-icon color="#d35400"><Document /></el-icon>
+                      <span>导出教学评价表zip</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item class="judge-export-item" command="xlsx">
+                      <el-icon color="#2f80ed"><Files /></el-icon>
+                      <span>导出为 xlsx</span>
+                    </el-dropdown-item>
+                    <el-dropdown-item class="judge-export-item" command="docx">
+                      <el-icon color="#f2994a"><Document /></el-icon>
+                      <span>导出为 docx</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
               </el-dropdown>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="glass-panel" style="padding: 6px; overflow-x: auto">
+      <section class="glass-panel judge-score-table-panel" style="padding: 8px; overflow-x: auto">
         <el-table class="dense-table" :data="filteredStudents" border :row-class-name="rowClassName" min-width="720">
-          <el-table-column label="#" width="25" fixed="left">
+          <el-table-column label="#" width="36" fixed="left">
             <template #default="{ row }">
               <span>{{ row.orderNo }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="姓名" width="60" fixed="left">
+          <el-table-column label="姓名" width="88" fixed="left">
             <template #default="{ row }">
               <div class="student-name-cell">
                 <span>{{ row.name }}</span>
@@ -1056,7 +1060,7 @@ onBeforeRouteUpdate(async () => {
             </template>
           </el-table-column>
 
-          <el-table-column label="评语" :min-width="compactScoreTable ? 150 : 84">
+          <el-table-column label="评语" :min-width="compactScoreTable ? 184 : 132">
             <template #default="{ row }">
               <div class="row-comment-box">
                 <el-input

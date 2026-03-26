@@ -1666,87 +1666,90 @@ onUnmounted(() => {
           </div>
         </section>
 
-        <section class="glass-panel entity-card admin-online-card">
-          <div class="admin-online-title">
-            <div class="admin-online-icon">
-              <el-icon><Connection /></el-icon>
+        <div class="admin-top-side">
+          <section class="stats-row admin-dashboard-stats">
+            <div class="glass-panel stat-card">
+              <div class="muted">活动数</div>
+              <div class="stat-value">{{ activities.length }}</div>
             </div>
-            <div>
-              <div style="font-weight: 700">实时在线用户</div>
-              <div class="muted" style="font-size: 12px">
-                {{ currentActivity?.name ? `${currentActivity.name} 在线连接` : "当前系统在线连接" }}
+            <div class="glass-panel stat-card">
+              <div class="muted">学生数</div>
+              <div class="stat-value">{{ dashboard?.studentCount || 0 }}</div>
+            </div>
+            <div class="glass-panel stat-card">
+              <div class="muted">评委数</div>
+              <div class="stat-value">{{ dashboard?.judgeCount || 0 }}</div>
+            </div>
+            <div class="glass-panel stat-card">
+              <div class="muted">已完成</div>
+              <div class="stat-value">{{ dashboard?.completedStudentCount || 0 }}</div>
+            </div>
+          </section>
+
+          <section class="glass-panel entity-card admin-online-card">
+            <div class="admin-online-title">
+              <div class="admin-online-icon">
+                <el-icon><Connection /></el-icon>
+              </div>
+              <div>
+                <div style="font-weight: 700">实时在线用户</div>
+                <div class="muted" style="font-size: 12px">
+                  {{ currentActivity?.name ? `${currentActivity.name} 在线连接` : "当前系统在线连接" }}
+                </div>
               </div>
             </div>
-          </div>
-          <div class="admin-online-total">
-            <el-icon><UserFilled /></el-icon>
-            <span>{{ activeActivityOnlineUsers.length }}</span>
-          </div>
-          <div v-if="activeActivityOnlineRoleStats.length" class="admin-online-meta">
-            <span v-for="item in activeActivityOnlineRoleStats" :key="item.key" class="admin-online-role-stat">
-              {{ item.label }} {{ item.count }}
-            </span>
-          </div>
-          <template v-if="activeActivityOnlineUsers.length">
-            <div class="admin-online-name-flow">
-              <div v-for="user in activeActivityOnlineUsers" :key="user.id" class="admin-online-name-item">
-                <el-popover
-                  placement="bottom-start"
-                  trigger="click"
-                  :width="220"
-                  popper-class="admin-online-popover"
-                  :show-arrow="true"
-                >
-                  <template #reference>
-                    <button type="button" class="admin-online-name-card" :style="getOnlineUserCardStyle(user)">
-                      {{ user.realName || user.username }}
-                    </button>
-                  </template>
-                  <div class="admin-online-popover-body">
-                    <div class="admin-online-popover-name">{{ user.realName || user.username }}</div>
-                    <div class="admin-online-popover-role">{{ resolveOnlineRoleLabel(user) }}</div>
-                    <div class="admin-online-popover-list">
-                      <div class="admin-online-popover-item">
-                        <span>账号</span>
-                        <strong>{{ user.username }}</strong>
-                      </div>
-                      <div class="admin-online-popover-item">
-                        <span>活动</span>
-                        <strong>{{ user.activityName || currentActivity?.name || "未绑定活动" }}</strong>
-                      </div>
-                      <div class="admin-online-popover-item">
-                        <span>分组</span>
-                        <strong>{{ user.groupName || "未分组" }}</strong>
+            <div class="admin-online-total">
+              <el-icon><UserFilled /></el-icon>
+              <span>{{ activeActivityOnlineUsers.length }}</span>
+            </div>
+            <div v-if="activeActivityOnlineRoleStats.length" class="admin-online-meta">
+              <span v-for="item in activeActivityOnlineRoleStats" :key="item.key" class="admin-online-role-stat">
+                {{ item.label }} {{ item.count }}
+              </span>
+            </div>
+            <template v-if="activeActivityOnlineUsers.length">
+              <div class="admin-online-name-flow">
+                <div v-for="user in activeActivityOnlineUsers" :key="user.id" class="admin-online-name-item">
+                  <el-popover
+                    placement="bottom-start"
+                    trigger="click"
+                    :width="220"
+                    popper-class="admin-online-popover"
+                    :show-arrow="true"
+                  >
+                    <template #reference>
+                      <button type="button" class="admin-online-name-card" :style="getOnlineUserCardStyle(user)">
+                        {{ user.realName || user.username }}
+                      </button>
+                    </template>
+                    <div class="admin-online-popover-body">
+                      <div class="admin-online-popover-name">{{ user.realName || user.username }}</div>
+                      <div class="admin-online-popover-role">{{ resolveOnlineRoleLabel(user) }}</div>
+                      <div class="admin-online-popover-list">
+                        <div class="admin-online-popover-item">
+                          <span>账号</span>
+                          <strong>{{ user.username }}</strong>
+                        </div>
+                        <div class="admin-online-popover-item">
+                          <span>活动</span>
+                          <strong>{{ user.activityName || currentActivity?.name || "未绑定活动" }}</strong>
+                        </div>
+                        <div class="admin-online-popover-item">
+                          <span>分组</span>
+                          <strong>{{ user.groupName || "未分组" }}</strong>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </el-popover>
+                  </el-popover>
+                </div>
               </div>
-            </div>
-          </template>
-          <el-empty v-else description="当前激活活动暂无在线用户" :image-size="60" />
-        </section>
+            </template>
+            <el-empty v-else description="当前激活活动暂无在线用户" :image-size="60" />
+          </section>
+        </div>
       </section>
 
       <div class="admin-dashboard-stack">
-      <section class="stats-row admin-dashboard-block" style="margin-bottom: 10px">
-        <div class="glass-panel stat-card">
-          <div class="muted">活动数</div>
-          <div class="stat-value">{{ activities.length }}</div>
-        </div>
-        <div class="glass-panel stat-card">
-          <div class="muted">学生数</div>
-          <div class="stat-value">{{ dashboard?.studentCount || 0 }}</div>
-        </div>
-        <div class="glass-panel stat-card">
-          <div class="muted">评委数</div>
-          <div class="stat-value">{{ dashboard?.judgeCount || 0 }}</div>
-        </div>
-        <div class="glass-panel stat-card">
-          <div class="muted">已完成</div>
-          <div class="stat-value">{{ dashboard?.completedStudentCount || 0 }}</div>
-        </div>
-      </section>
 
       <section class="glass-panel admin-dashboard-block" style="padding: 12px">
         <div class="panel-header">
