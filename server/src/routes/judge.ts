@@ -32,13 +32,55 @@ import { ensureActivityUnlocked, ensureGroupUnlocked, createHttpError, getCurren
 const AI_API_URL = process.env.AI_API_URL?.trim() || process.env.OLLAMA_API_URL?.trim() || "http://127.0.0.1:11434/api/chat";
 const AI_MODEL = process.env.AI_MODEL?.trim() || process.env.OLLAMA_MODEL?.trim() || "qwen3:8b";
 const AI_THINK = process.env.AI_THINK?.trim() || process.env.OLLAMA_THINK?.trim() || "";
+const AI_PROVIDER = process.env.AI_PROVIDER?.trim().toLowerCase() || "auto";
+const AI_API_TOKEN = process.env.AI_API_TOKEN?.trim()
+  || process.env.AI_AUTH_TOKEN?.trim()
+  || process.env.CLOUDFLARE_API_TOKEN?.trim()
+  || "";
 
 function isChatApiUrl(url: string) {
   return /\/api\/chat(?:[/?#]|$)/i.test(url);
 }
 
-function buildAiRequestBody(prompt: string) {
+function resolveAiProvider() {
+  if (AI_PROVIDER !== "auto") {
+    return AI_PROVIDER;
+  }
+
+  if (/api\.cloudflare\.com/i.test(AI_API_URL) && /\/ai\/run\/?$/i.test(AI_API_URL)) {
+    return "cloudflare";
+  }
+
   if (isChatApiUrl(AI_API_URL)) {
+    return "chat";
+  }
+
+  return "generate";
+}
+
+function buildAiRequest(prompt: string) {
+  const provider = resolveAiProvider();
+
+  if (provider === "cloudflare") {
+    if (!AI_API_TOKEN) {
+      throw createHttpError("Cloudflare AI 已启用，但未配置 AI_API_TOKEN", 500);
+    }
+
+    return {
+      url: `${AI_API_URL.replace(/\/+$/, "")}/${AI_MODEL}`,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${AI_API_TOKEN}`,
+      },
+      body: {
+        messages: [
+          { role: "user", content: prompt },
+        ],
+      },
+    };
+  }
+
+  if (provider === "chat") {
     const payload: {
       model: string;
       messages: Array<{ role: "user"; content: string }>;
@@ -56,17 +98,32 @@ function buildAiRequestBody(prompt: string) {
       payload.think = AI_THINK;
     }
 
-    return payload;
+    return {
+      url: AI_API_URL,
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    };
   }
 
   return {
-    model: AI_MODEL,
-    prompt,
-    stream: false,
+    url: AI_API_URL,
+    headers: { "Content-Type": "application/json" },
+    body: {
+      model: AI_MODEL,
+      prompt,
+      stream: false,
+    },
   };
 }
 
-function extractAiText(data: { message?: { content?: unknown }; response?: unknown }) {
+function extractAiText(data: {
+  message?: { content?: unknown };
+  response?: unknown;
+  result?: { response?: unknown };
+}) {
+  if (typeof data.result?.response === "string") {
+    return data.result.response;
+  }
   if (typeof data.message?.content === "string") {
     return data.message.content;
   }
@@ -290,10 +347,11 @@ async function generateCommentByOllama(params: {
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const response = await fetch(AI_API_URL, {
+    const requestConfig = buildAiRequest(prompt);
+    const response = await fetch(requestConfig.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildAiRequestBody(prompt)),
+      headers: requestConfig.headers,
+      body: JSON.stringify(requestConfig.body),
       signal: controller.signal,
     });
 
@@ -301,7 +359,7 @@ async function generateCommentByOllama(params: {
       throw createHttpError(`AI 调用失败: ${response.status}`, 502);
     }
 
-    const data = await response.json() as { message?: { content?: unknown }; response?: unknown };
+    const data = await response.json() as { message?: { content?: unknown }; response?: unknown; result?: { response?: unknown } };
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
@@ -331,10 +389,11 @@ async function generateQuestionsByOllama(topic: string) {
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const response = await fetch(AI_API_URL, {
+    const requestConfig = buildAiRequest(prompt);
+    const response = await fetch(requestConfig.url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildAiRequestBody(prompt)),
+      headers: requestConfig.headers,
+      body: JSON.stringify(requestConfig.body),
       signal: controller.signal,
     });
 
@@ -342,7 +401,7 @@ async function generateQuestionsByOllama(topic: string) {
       throw createHttpError(`AI 调用失败: ${response.status}`, 502);
     }
 
-    const data = await response.json() as { message?: { content?: unknown }; response?: unknown };
+    const data = await response.json() as { message?: { content?: unknown }; response?: unknown; result?: { response?: unknown } };
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);

@@ -79,12 +79,26 @@ AI_API_URL="http://127.0.0.1:11434/api/chat"
 AI_MODEL="gpt-oss:20b"
 # 仅在模型/服务支持时再配置；不支持就留空或删除
 AI_THINK="low"
+# 可选：auto / chat / generate / cloudflare，默认 auto
+AI_PROVIDER="auto"
+# Cloudflare 等需要鉴权时可配置
+AI_API_TOKEN=""
 ```
 
 说明 / Notes:
 
 - `AI_API_URL` 默认支持 Ollama 兼容接口。若地址是 `/api/chat`，后端会按聊天格式发送 `messages`。  
   `AI_API_URL` supports Ollama-compatible endpoints. If the URL points to `/api/chat`, the backend sends chat-style `messages`.
+- 若使用 Cloudflare Workers AI，可配置为：  
+  For Cloudflare Workers AI, you can configure:
+
+```env
+AI_PROVIDER="cloudflare"
+AI_API_URL="https://api.cloudflare.com/client/v4/accounts/your-account-id/ai/run/"
+AI_MODEL="@cf/meta/llama-3-8b-instruct"
+AI_API_TOKEN="your-cloudflare-api-token"
+```
+
 - `AI_THINK` 是可选项。只有配置了该环境变量时，后端才会把 `think` 字段一并传给模型。  
   `AI_THINK` is optional. The backend includes the `think` field only when this env var is configured.
 - 兼容旧变量名 `OLLAMA_API_URL`、`OLLAMA_MODEL`、`OLLAMA_THINK`，但建议后续统一使用 `AI_*`。  
