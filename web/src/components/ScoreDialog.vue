@@ -32,7 +32,6 @@ const quickTotal = ref<number | undefined>(undefined);
 const maxTotal = computed(() => props.template?.items.reduce((s, i) => s + i.maxScore, 0) ?? 0);
 const generatingComment = ref(false);
 const generatingQuestions = ref(false);
-const commentPrompt = ref("");
 const questionTopic = ref("师范生面试问题");
 const scoreItemsOpen = ref(true);
 const aiQuestions = ref<string[]>([]);
@@ -175,7 +174,6 @@ async function generateComment() {
       `/api/judge/activities/${props.activityId}/students/${props.student.id}/generate-comment`,
       {
         totalScore: total.value,
-        prompt: commentPrompt.value.trim() || undefined,
         templateId: props.template.id,
         details: isTotalOnly.value
           ? []
@@ -274,10 +272,9 @@ async function generateQuestions() {
         </div>
         <el-input v-model="form.comment" class="comment-font-field" :disabled="readonly" type="textarea" :rows="3" placeholder="请输入评语" style="margin-top: 14px" />
         <div class="score-comment-toolbar">
-          <el-input v-model="commentPrompt" :disabled="readonly" placeholder="自定义提示词（留空则自动生成）" />
           <el-button type="primary" plain :disabled="readonly" :loading="generatingComment" @click="generateComment">AI生成评语</el-button>
         </div>
-        <div class="muted" style="margin-top: 4px; font-size: 12px">填写自定义提示词后，会直接把这段文字作为完整提示词发送给 AI，并原样回填结果；留空则按评分信息自动生成。</div>
+        <div class="muted" style="margin-top: 4px; font-size: 12px">AI 会根据当前评分信息自动生成更贴合的评语。</div>
       </div>
 
       <div class="glass-panel entity-card">
@@ -353,10 +350,8 @@ async function generateQuestions() {
 }
 
 .score-comment-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
+  display: flex;
+  justify-content: flex-end;
   margin-top: 8px;
 }
 

@@ -37,6 +37,8 @@ const AI_API_TOKEN = process.env.AI_API_TOKEN?.trim()
   || process.env.AI_AUTH_TOKEN?.trim()
   || process.env.CLOUDFLARE_API_TOKEN?.trim()
   || "";
+const COMMENT_SYSTEM_PROMPT = "你是教学评分系统里的评语生成器。只输出可直接写入评分表的中文评语正文。禁止出现“你的”“您的”“学生的”“该生的”“选手的”等第二人称或领属说法；禁止输出称呼、解释、分析过程、客套话、标题、引号、项目符号；必须是完整短句。";
+const QUESTION_SYSTEM_PROMPT = "你是教学面试现场提问生成器。只输出可直接提问的问题文本，不要解释，不要答案，不要寒暄。";
 
 function isChatApiUrl(url: string) {
   return /\/api\/chat(?:[/?#]|$)/i.test(url);
@@ -58,7 +60,7 @@ function resolveAiProvider() {
   return "generate";
 }
 
-function buildAiRequest(prompt: string) {
+function buildAiRequest(prompt: string, systemPrompt?: string) {
   const provider = resolveAiProvider();
 
   if (provider === "cloudflare") {
@@ -74,6 +76,7 @@ function buildAiRequest(prompt: string) {
       },
       body: {
         messages: [
+          ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
           { role: "user", content: prompt },
         ],
       },
@@ -83,12 +86,13 @@ function buildAiRequest(prompt: string) {
   if (provider === "chat") {
     const payload: {
       model: string;
-      messages: Array<{ role: "user"; content: string }>;
+      messages: Array<{ role: "system" | "user"; content: string }>;
       stream: false;
       think?: string;
     } = {
       model: AI_MODEL,
       messages: [
+        ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
         { role: "user", content: prompt },
       ],
       stream: false,
@@ -193,10 +197,15 @@ function normalizeAiComment(raw: string) {
 
   if (!compact) return "";
 
-  const normalized = compact.replace(/[；;。.!！？?、]+/g, "|");
+  const cleaned = compact
+    .replace(/^(评语|评价|建议|结果)[:：]/, "")
+    .replace(/^(你的|您的|学生的|该生的|选手的)/, "");
+
+  const normalized = cleaned.replace(/[；;。.!！？?、]+/g, "|");
   const parts = normalized
     .split("|")
     .map((item) => item.trim().replace(/^[，,;；。、]+|[，,;；。、]+$/g, ""))
+    .map((item) => item.replace(/^(你的|您的|学生的|该生的|选手的)/, ""))
     .filter(Boolean)
     .filter((item) => item.length >= 6)
     .filter((item) => item.length <= 32);
@@ -209,7 +218,7 @@ function normalizeAiComment(raw: string) {
     return parts[0];
   }
 
-  const fallback = compact
+  const fallback = cleaned
     .replace(/[。.!！？?]/g, "")
     .replace(/[；;]/g, "；")
     .replace(/[，,]{2,}/g, "，")
@@ -291,7 +300,6 @@ function summarizeScoreDetails(scoreDetails: Array<{
 
 function buildCommentPrompt(params: {
   totalScore: number;
-  customPrompt?: string;
   scoreDetails?: Array<{
     name: string;
     maxScore: number;
@@ -301,11 +309,9 @@ function buildCommentPrompt(params: {
 }) {
   const lines = [
     "你现在是师范生面试讲课评委，请根据下面的评分信息生成1句或2句简短评语。",
-    params.customPrompt
-      ? `额外要求：${params.customPrompt}`
-      : "要求：结合分数高低判断学生表现，评语要贴合具体表现，不要空泛套话。",
+    "要求：结合分数高低判断学生表现，评语要贴合具体表现，不要空泛套话。",
     getCommentToneGuide(params.totalScore),
-    "输出要求：每句12到28字；句意必须完整自然；不要半句停住；不要换行；不要编号；不要解释；句子之间用中文分号连接，不要用句号；只输出最终评语。",
+    "输出要求：每句12到28字；句意必须完整自然；不要半句停住；不要换行；不要编号；不要解释；不要出现“你的”“您的”“学生的”“该生的”这类说法；句子之间用中文分号连接，不要用句号；只输出最终评语。",
   ];
 
   if (params.scoreDetails?.length) {
@@ -333,7 +339,6 @@ function buildCommentPrompt(params: {
 
 async function generateCommentByOllama(params: {
   totalScore: number;
-  customPrompt?: string;
   scoreDetails?: Array<{
     name: string;
     maxScore: number;
@@ -341,13 +346,12 @@ async function generateCommentByOllama(params: {
     description?: string | null;
   }>;
 }) {
-  const customPrompt = params.customPrompt?.trim();
-  const prompt = customPrompt || buildCommentPrompt(params);
+  const prompt = buildCommentPrompt(params);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const requestConfig = buildAiRequest(prompt);
+    const requestConfig = buildAiRequest(prompt, COMMENT_SYSTEM_PROMPT);
     const response = await fetch(requestConfig.url, {
       method: "POST",
       headers: requestConfig.headers,
@@ -363,9 +367,6 @@ async function generateCommentByOllama(params: {
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
-    }
-    if (customPrompt) {
-      return rawText;
     }
     const text = normalizeAiComment(rawText);
     if (!text) {
@@ -389,7 +390,7 @@ async function generateQuestionsByOllama(topic: string) {
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const requestConfig = buildAiRequest(prompt);
+    const requestConfig = buildAiRequest(prompt, QUESTION_SYSTEM_PROMPT);
     const response = await fetch(requestConfig.url, {
       method: "POST",
       headers: requestConfig.headers,
@@ -1663,7 +1664,6 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
     const body = request.body as {
       totalScore: number;
-      prompt?: string;
       templateId?: string;
       details?: Array<{ itemId: string; scoreValue: number }>;
     };
@@ -1672,7 +1672,6 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
       throw createHttpError("总分无效", 400);
     }
 
-    const customPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     await ensureJudgeAccess(activityId, studentId, request.user.userId);
     let scoreDetails: Array<{
       name: string;
@@ -1703,7 +1702,6 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
     const comment = await generateCommentByOllama({
       totalScore: Number(body.totalScore),
-      customPrompt: customPrompt || undefined,
       scoreDetails,
     });
     return { comment };
