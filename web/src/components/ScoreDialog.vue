@@ -277,7 +277,7 @@ async function generateQuestions() {
           <el-input v-model="commentPrompt" :disabled="readonly" placeholder="自定义提示词（留空则自动生成）" />
           <el-button type="primary" plain :disabled="readonly" :loading="generatingComment" @click="generateComment">AI生成评语</el-button>
         </div>
-        <div class="muted" style="margin-top: 4px; font-size: 12px">填写自定义提示词后，AI将按照提示词生成评语；留空则根据分值自动生成。</div>
+        <div class="muted" style="margin-top: 4px; font-size: 12px">填写自定义提示词后，会直接把这段文字作为完整提示词发送给 AI，并原样回填结果；留空则按评分信息自动生成。</div>
       </div>
 
       <div class="glass-panel entity-card">

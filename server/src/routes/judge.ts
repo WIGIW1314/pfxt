@@ -284,7 +284,8 @@ async function generateCommentByOllama(params: {
     description?: string | null;
   }>;
 }) {
-  const prompt = buildCommentPrompt(params);
+  const customPrompt = params.customPrompt?.trim();
+  const prompt = customPrompt || buildCommentPrompt(params);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
@@ -304,6 +305,9 @@ async function generateCommentByOllama(params: {
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
+    }
+    if (customPrompt) {
+      return rawText;
     }
     const text = normalizeAiComment(rawText);
     if (!text) {
