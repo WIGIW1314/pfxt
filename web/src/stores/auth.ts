@@ -11,7 +11,7 @@ export const useAuthStore = defineStore("auth", () => {
   const isJudge = computed(() => user.value?.role === "JUDGE" || user.value?.role === "SECRETARY");
   const currentActivityRole = computed(() => {
     const roles = user.value?.activityRoles || [];
-    return roles.find((r) => r.activity?.isActive) ?? roles[0] ?? null;
+    return roles.find((r) => r.activity?.isActive) ?? null;
   });
 
   async function login(username: string, password: string) {

@@ -203,7 +203,7 @@ async function fetchCurrentBinding() {
     const { data } = await api.get("/api/judge/current-activity");
     currentActivity.value = data;
   } catch {
-    // retain stale data on failure
+    currentActivity.value = null;
   }
 }
 
@@ -226,14 +226,14 @@ async function fetchJudgeData(options?: { refreshBinding?: boolean }) {
     await fetchCurrentBinding();
   }
 
-  const currentActivityId = currentActivity.value?.activity?.id || auth.currentActivityRole?.activityId || "";
-  if (!currentActivityId && currentActivity.value?.activity?.id) {
-    return fetchJudgeData(options);
-  }
+  const currentActivityId = currentActivity.value?.activity?.id || "";
 
   if (!currentActivityId) {
+    currentStudent.value = null;
+    peerStudent.value = null;
     students.value = [];
     progress.value = { total: 0, submitted: 0, draft: 0, pending: 0 };
+    syncRowForms();
     return;
   }
 
@@ -710,20 +710,24 @@ watch(
       return;
     }
 
+    if (evt.type === "activity.updated") {
+      try {
+        await auth.fetchMe();
+        sync.reconnect();
+        await fetchJudgeData();
+        await refreshOpenStudentDialogs(evt.payload?.studentId as string | undefined);
+      } catch {
+        // silent — background sync refresh
+      }
+      return;
+    }
+
     const payloadActivityId = evt.payload?.activityId as string | undefined;
     if (!isCurrentActivityEvent(payloadActivityId)) {
       return;
     }
 
     try {
-      if (evt.type === "activity.updated") {
-        await auth.fetchMe();
-        sync.reconnect();
-        await fetchJudgeData();
-        await refreshOpenStudentDialogs(evt.payload?.studentId as string | undefined);
-        return;
-      }
-
       if (evt.type === "score.updated") {
         // Batch broadcast has no studentId — do a full row refresh
         await fetchJudgeData({ refreshBinding: false });
