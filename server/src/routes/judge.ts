@@ -266,14 +266,18 @@ function normalizeAiComment(raw: string) {
   if (!compact) return "";
 
   const cleaned = compact
+    .replace(/^[·•▪◦]\s*/g, "")
     .replace(/^(高分评语|中分评语|低分评语|评语示例|评语|评价|建议|结果)[:：]/, "")
+    .replace(/^句[0-9一二三四五六七八九十]+[:：]/, "")
     .replace(/^(你的|您的|学生的|该生的|选手的)/, "");
 
   const normalized = cleaned.replace(/[；;。.!！？?、]+/g, "|");
   const parts = normalized
     .split("|")
     .map((item) => item.trim().replace(/^[，,;；。、]+|[，,;；。、]+$/g, ""))
+    .map((item) => item.replace(/^[·•▪◦]\s*/g, ""))
     .map((item) => item.replace(/^(高分评语|中分评语|低分评语|评语示例|评语|评价|建议|结果)[:：]/, ""))
+    .map((item) => item.replace(/^句[0-9一二三四五六七八九十]+[:：]/, ""))
     .map((item) => item.replace(/^(你的|您的|学生的|该生的|选手的)/, ""))
     .filter(Boolean)
     .filter((item) => item.length >= 6)
@@ -311,11 +315,15 @@ function normalizeAiQuestions(raw: string) {
     .replace(/[；;。！？!?]+/g, "|")
     .split("|")
     .map((item) => item.trim())
+    .map((item) => item.replace(/^[·•▪◦]\s*/g, ""))
     .map((item) => item.replace(/^[-*•]\s*/g, ""))
     .map((item) => item.replace(/^[0-9一二三四五六七八九十]+[、.)）]?\s*/g, ""))
     .map((item) => item.replace(/^问题[:：]?/g, ""))
+    .map((item) => item.replace(/^问题[0-9一二三四五六七八九十]+[:：]?/g, ""))
     .map((item) => item.replace(/^追问[:：]?/g, ""))
+    .map((item) => item.replace(/^追问[0-9一二三四五六七八九十]+[:：]?/g, ""))
     .map((item) => item.replace(/^建议提问[:：]?/g, ""))
+    .map((item) => item.replace(/^题目[0-9一二三四五六七八九十]+[:：]?/g, ""))
     .map((item) => item.replace(/^(请问[:：]?)?/g, ""))
     .map((item) => item.replace(/^您认为/g, "如何看待"))
     .map((item) => item.replace(/^你认为/g, "如何看待"))
@@ -340,9 +348,11 @@ function normalizeAiQuestions(raw: string) {
   }
 
   const fallback = compact
+    .replace(/^[·•▪◦\s]+/g, "")
     .replace(/^[-*•\s]+/g, "")
     .replace(/^[0-9一二三四五六七八九十]+[、.)）]?\s*/g, "")
     .replace(/^(问题|追问|建议提问)[:：]?/g, "")
+    .replace(/^(问题|追问|题目)[0-9一二三四五六七八九十]+[:：]?/g, "")
     .replace(/^(请问[:：]?)?/g, "")
     .replace(/^您认为/g, "如何看待")
     .replace(/^你认为/g, "如何看待")
