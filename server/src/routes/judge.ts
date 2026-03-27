@@ -38,7 +38,7 @@ const AI_API_TOKEN = process.env.AI_API_TOKEN?.trim()
   || process.env.CLOUDFLARE_API_TOKEN?.trim()
   || "";
 const COMMENT_SYSTEM_PROMPT = "你是教学评分系统里的评语生成器。只输出可直接写入评分表的中文评语正文。禁止出现“你的”“您的”“学生的”“该生的”“选手的”等第二人称或领属说法；禁止输出称呼、解释、分析过程、客套话、标题、引号、项目符号；必须是完整短句。";
-const QUESTION_SYSTEM_PROMPT = "你是教学面试现场提问生成器。只输出可直接提问的问题文本，不要解释，不要答案，不要寒暄。";
+const QUESTION_SYSTEM_PROMPT = "你是教学面试现场提问生成器。只输出可直接提问的问题文本，不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
 
 function isChatApiUrl(url: string) {
   return /\/api\/chat(?:[/?#]|$)/i.test(url);
@@ -198,13 +198,14 @@ function normalizeAiComment(raw: string) {
   if (!compact) return "";
 
   const cleaned = compact
-    .replace(/^(评语|评价|建议|结果)[:：]/, "")
+    .replace(/^(高分评语|中分评语|低分评语|评语示例|评语|评价|建议|结果)[:：]/, "")
     .replace(/^(你的|您的|学生的|该生的|选手的)/, "");
 
   const normalized = cleaned.replace(/[；;。.!！？?、]+/g, "|");
   const parts = normalized
     .split("|")
     .map((item) => item.trim().replace(/^[，,;；。、]+|[，,;；。、]+$/g, ""))
+    .map((item) => item.replace(/^(高分评语|中分评语|低分评语|评语示例|评语|评价|建议|结果)[:：]/, ""))
     .map((item) => item.replace(/^(你的|您的|学生的|该生的|选手的)/, ""))
     .filter(Boolean)
     .filter((item) => item.length >= 6)
@@ -243,6 +244,15 @@ function normalizeAiQuestions(raw: string) {
     .map((item) => item.trim())
     .map((item) => item.replace(/^[0-9一二三四五六七八九十]+[、.)）]?\s*/g, ""))
     .map((item) => item.replace(/^问题[:：]?/g, ""))
+    .map((item) => item.replace(/^(请问[:：]?)?/g, ""))
+    .map((item) => item.replace(/^您认为/g, "如何看待"))
+    .map((item) => item.replace(/^你认为/g, "如何看待"))
+    .map((item) => item.replace(/^您如何/g, "如何"))
+    .map((item) => item.replace(/^你如何/g, "如何"))
+    .map((item) => item.replace(/^您的/g, ""))
+    .map((item) => item.replace(/^你的/g, ""))
+    .map((item) => item.replace(/^您/g, ""))
+    .map((item) => item.replace(/^你/g, ""))
     .map((item) => item.replace(/[？?]+$/g, ""))
     .filter(Boolean)
     .filter((item) => item.length <= 30)
