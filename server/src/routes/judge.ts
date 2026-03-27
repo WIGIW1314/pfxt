@@ -38,7 +38,7 @@ const AI_API_TOKEN = process.env.AI_API_TOKEN?.trim()
   || process.env.CLOUDFLARE_API_TOKEN?.trim()
   || "";
 const COMMENT_SYSTEM_PROMPT = "你是教学评分系统里的评语生成器。只输出可直接写入评分表的中文评语正文。禁止出现“你的”“您的”“学生的”“该生的”“选手的”等第二人称或领属说法；禁止输出称呼、解释、分析过程、客套话、标题、引号、项目符号；必须是完整短句。";
-const QUESTION_SYSTEM_PROMPT = "你是教学面试现场提问生成器。只输出可直接提问的问题文本，不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
+const QUESTION_SYSTEM_PROMPT = "你是师范生模拟讲课评分现场的评委提问生成器。提问对象是大学生师范生，不是成熟教师。问题必须紧扣试讲主题和课堂片段，难度适中，适合讲课结束后的现场追问。只输出可直接提问的问题文本，不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
 
 function isChatApiUrl(url: string) {
   return /\/api\/chat(?:[/?#]|$)/i.test(url);
@@ -395,7 +395,15 @@ async function generateCommentByOllama(params: {
 }
 
 async function generateQuestionsByOllama(topic: string) {
-  const prompt = `你现在是师范生面试考官，请围绕主题“${topic}”生成1到2个现场提问问题。要求：题目不要太难，适合师范生面试或讲课后的追问；语气自然；每题不超过30字；不要换行解释；不要答案；只输出题目本身。`;
+  const prompt = `场景：一名大学生师范生刚完成“${topic}”的模拟讲课，评委需要在试讲结束后做1到2个有针对性的现场追问。
+要求：
+1. 问题必须紧扣“${topic}”本身，不要跑题。
+2. 问题难度不要太高，要符合大学生师范生试讲后的问答场景。
+3. 优先追问教学设计、重点难点处理、师生互动、课堂组织、教学方法，而不是学科研究或过深理论。
+4. 语气自然、口语化、像评委现场发问。
+5. 每题不超过30字。
+6. 不要答案，不要解释，不要开场白，不要编号。
+只输出题目本身。`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
