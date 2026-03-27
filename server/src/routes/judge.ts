@@ -183,10 +183,105 @@ function normalizeAiQuestions(raw: string) {
   return parts;
 }
 
-async function generateCommentByOllama(totalScore: number, customPrompt?: string) {
-  const prompt = customPrompt
-    ? customPrompt
-    : `一个师范生面试讲课，评委打了${totalScore}分，请根据这个分值随机生成1句或2句简短评语。要求：每句10到20字；句意完整自然；不要换行；不要编号；不要解释；句子之间用中文分号连接，不要用句号。只输出最终评语。`;
+function getCommentToneGuide(totalScore: number) {
+  if (totalScore < 60) {
+    return "总评语气：明显指出不足，语气保持克制客观，优先点出需要改进的教学问题，不要写成鼓励口号。";
+  }
+  if (totalScore < 70) {
+    return "总评语气：以问题为主，适当保留少量中性评价，突出基础能力仍需加强。";
+  }
+  if (totalScore < 80) {
+    return "总评语气：中等偏稳，既写出已有表现，也点出1个较明显短板，语气平衡。";
+  }
+  if (totalScore < 90) {
+    return "总评语气：整体肯定为主，可轻点一个细节改进方向，避免写得过满。";
+  }
+  if (totalScore < 100) {
+    return "总评语气：明显肯定学生优势，突出亮点表现，措辞积极但不要夸张失真。";
+  }
+  return "总评语气：高度肯定整体表现，重点突出教学亮点、表达成熟度和课堂把控力。";
+}
+
+function summarizeScoreDetails(scoreDetails: Array<{
+  name: string;
+  maxScore: number;
+  scoreValue: number;
+  description?: string | null;
+}>) {
+  const items = scoreDetails.map((item) => ({
+    ...item,
+    ratio: item.maxScore > 0 ? item.scoreValue / item.maxScore : 0,
+  }));
+  const sorted = [...items].sort((a, b) => b.ratio - a.ratio || b.scoreValue - a.scoreValue);
+  const strengths = sorted
+    .filter((item) => item.ratio >= 0.85)
+    .slice(0, 2)
+    .map((item) => item.name);
+  const weaknesses = [...sorted]
+    .reverse()
+    .filter((item) => item.ratio <= 0.65)
+    .slice(0, 2)
+    .map((item) => item.name);
+
+  return {
+    strengths,
+    weaknesses,
+  };
+}
+
+function buildCommentPrompt(params: {
+  totalScore: number;
+  customPrompt?: string;
+  scoreDetails?: Array<{
+    name: string;
+    maxScore: number;
+    scoreValue: number;
+    description?: string | null;
+  }>;
+}) {
+  const lines = [
+    "你现在是师范生面试讲课评委，请根据下面的评分信息生成1句或2句简短评语。",
+    params.customPrompt
+      ? `额外要求：${params.customPrompt}`
+      : "要求：结合分数高低判断学生表现，评语要贴合具体表现，不要空泛套话。",
+    getCommentToneGuide(params.totalScore),
+    "输出要求：每句10到20字；句意完整自然；不要换行；不要编号；不要解释；句子之间用中文分号连接，不要用句号；只输出最终评语。",
+  ];
+
+  if (params.scoreDetails?.length) {
+    const { strengths, weaknesses } = summarizeScoreDetails(params.scoreDetails);
+    lines.push(`总分：${params.totalScore}分。`);
+    lines.push("评分标准与得分：");
+    params.scoreDetails.forEach((item, index) => {
+      const description = item.description ? `；说明：${item.description}` : "";
+      lines.push(`${index + 1}. ${item.name}（满分${item.maxScore}分）：得分${item.scoreValue}分${description}`);
+    });
+    if (strengths.length) {
+      lines.push(`优先参考的亮点项：${strengths.join("、")}。`);
+    }
+    if (weaknesses.length) {
+      lines.push(`优先参考的短板项：${weaknesses.join("、")}。`);
+    }
+    lines.push("写评语时优先依据高低分项判断学生的具体强弱，不要只复述总分。");
+  } else {
+    lines.push(`总分：${params.totalScore}分。`);
+    lines.push("由于只有总分，没有分项明细，请按总分区间生成符合水平的整体评价。");
+  }
+
+  return lines.join("\n");
+}
+
+async function generateCommentByOllama(params: {
+  totalScore: number;
+  customPrompt?: string;
+  scoreDetails?: Array<{
+    name: string;
+    maxScore: number;
+    scoreValue: number;
+    description?: string | null;
+  }>;
+}) {
+  const prompt = buildCommentPrompt(params);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
@@ -1500,7 +1595,12 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.post("/api/judge/activities/:activityId/students/:studentId/generate-comment", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
-    const body = request.body as { totalScore: number; prompt?: string };
+    const body = request.body as {
+      totalScore: number;
+      prompt?: string;
+      templateId?: string;
+      details?: Array<{ itemId: string; scoreValue: number }>;
+    };
 
     if (!Number.isFinite(Number(body.totalScore))) {
       throw createHttpError("总分无效", 400);
@@ -1508,7 +1608,38 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
     const customPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
     await ensureJudgeAccess(activityId, studentId, request.user.userId);
-    const comment = await generateCommentByOllama(Number(body.totalScore), customPrompt || undefined);
+    let scoreDetails: Array<{
+      name: string;
+      maxScore: number;
+      scoreValue: number;
+      description?: string | null;
+    }> = [];
+
+    if (Array.isArray(body.details) && body.details.length) {
+      const { template } = await getEffectiveTemplate(activityId, body.templateId);
+      const detailMap = new Map(
+        body.details
+          .filter((item) => item && typeof item.itemId === "string" && Number.isFinite(Number(item.scoreValue)))
+          .map((item) => [item.itemId, Number(item.scoreValue)]),
+      );
+
+      if (template.scoreMode !== "TOTAL" && template.items?.length) {
+        scoreDetails = template.items
+          .filter((item) => detailMap.has(item.id))
+          .map((item) => ({
+            name: item.name,
+            maxScore: item.maxScore,
+            scoreValue: detailMap.get(item.id) || 0,
+            description: item.description,
+          }));
+      }
+    }
+
+    const comment = await generateCommentByOllama({
+      totalScore: Number(body.totalScore),
+      customPrompt: customPrompt || undefined,
+      scoreDetails,
+    });
     return { comment };
   });
 

@@ -173,7 +173,17 @@ async function generateComment() {
   try {
     const { data } = await api.post(
       `/api/judge/activities/${props.activityId}/students/${props.student.id}/generate-comment`,
-      { totalScore: total.value, prompt: commentPrompt.value.trim() || undefined },
+      {
+        totalScore: total.value,
+        prompt: commentPrompt.value.trim() || undefined,
+        templateId: props.template.id,
+        details: isTotalOnly.value
+          ? []
+          : props.template.items.map((item) => ({
+              itemId: item.id,
+              scoreValue: Number(form.details[item.id] || 0),
+            })),
+      },
     );
     form.comment = data.comment || "";
     ElMessage.success("评语已生成");

@@ -649,6 +649,13 @@ async function generateRowComment(student: Student) {
   try {
     const { data } = await api.post(`/api/judge/activities/${activityId.value}/students/${student.id}/generate-comment`, {
       totalScore: rowTotal(student.id),
+      templateId: template.value.id,
+      details: isTotalOnly.value
+        ? []
+        : template.value.items.map((item) => ({
+            itemId: item.id,
+            scoreValue: Number(rowForms[student.id]?.details?.[item.id] || 0),
+          })),
     });
     rowForms[student.id].comment = data.comment || "";
     ElMessage.success(`已为 ${student.name} 生成评语`);
