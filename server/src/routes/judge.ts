@@ -242,8 +242,11 @@ function normalizeAiQuestions(raw: string) {
     .replace(/[；;。！？!?]+/g, "|")
     .split("|")
     .map((item) => item.trim())
+    .map((item) => item.replace(/^[-*•]\s*/g, ""))
     .map((item) => item.replace(/^[0-9一二三四五六七八九十]+[、.)）]?\s*/g, ""))
     .map((item) => item.replace(/^问题[:：]?/g, ""))
+    .map((item) => item.replace(/^追问[:：]?/g, ""))
+    .map((item) => item.replace(/^建议提问[:：]?/g, ""))
     .map((item) => item.replace(/^(请问[:：]?)?/g, ""))
     .map((item) => item.replace(/^您认为/g, "如何看待"))
     .map((item) => item.replace(/^你认为/g, "如何看待"))
@@ -254,10 +257,38 @@ function normalizeAiQuestions(raw: string) {
     .map((item) => item.replace(/^您/g, ""))
     .map((item) => item.replace(/^你/g, ""))
     .map((item) => item.replace(/[？?]+$/g, ""))
+    .map((item) => item.replace(/^(在这节课中|在本节课中|针对这节课|针对本节课)/g, ""))
+    .map((item) => item.replace(/^(对于|关于)\s*/g, ""))
+    .map((item) => item.trim())
     .filter(Boolean)
-    .filter((item) => item.length <= 30)
+    .map((item) => item.length > 30 ? item.slice(0, 30).replace(/[，,;；、:：-]+$/g, "") : item)
+    .filter((item) => item.length >= 6)
     .slice(0, 2)
     .map((item) => `${item}？`);
+
+  if (parts.length) {
+    return parts;
+  }
+
+  const fallback = compact
+    .replace(/^[-*•\s]+/g, "")
+    .replace(/^[0-9一二三四五六七八九十]+[、.)）]?\s*/g, "")
+    .replace(/^(问题|追问|建议提问)[:：]?/g, "")
+    .replace(/^(请问[:：]?)?/g, "")
+    .replace(/^您认为/g, "如何看待")
+    .replace(/^你认为/g, "如何看待")
+    .replace(/^您如何/g, "如何")
+    .replace(/^你如何/g, "如何")
+    .replace(/^您的/g, "")
+    .replace(/^你的/g, "")
+    .replace(/^您/g, "")
+    .replace(/^你/g, "")
+    .replace(/[。.!！]+$/g, "")
+    .trim();
+
+  if (fallback.length >= 6) {
+    return [`${fallback.slice(0, 30).replace(/[，,;；、:：-]+$/g, "")}？`];
+  }
 
   return parts;
 }
