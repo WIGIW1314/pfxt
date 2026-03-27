@@ -37,6 +37,7 @@ const AI_API_TOKEN = process.env.AI_API_TOKEN?.trim()
   || process.env.AI_AUTH_TOKEN?.trim()
   || process.env.CLOUDFLARE_API_TOKEN?.trim()
   || "";
+const AI_REASONING_EFFORT = process.env.AI_REASONING_EFFORT?.trim().toLowerCase() || "low";
 const COMMENT_SYSTEM_PROMPT = "你是教学评分系统里的评语生成器。只输出可直接写入评分表的中文评语正文。禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；禁止出现“你的”“您的”“学生的”“该生的”“选手的”等第二人称或领属说法；禁止输出称呼、解释、分析过程、客套话、标题、引号、项目符号；必须是完整短句。";
 const QUESTION_SYSTEM_PROMPT = "你是师范生模拟讲课评分现场的评委提问生成器。提问对象是大学生师范生，不是成熟教师。问题必须紧扣试讲主题和课堂片段，难度适中，适合讲课结束后的现场追问。只输出可直接提问的中文问题文本，禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
 
@@ -60,6 +61,10 @@ function resolveAiProvider() {
   return "generate";
 }
 
+function isCloudflareOpenAiModel() {
+  return resolveAiProvider() === "cloudflare" && /^@cf\/openai\//i.test(AI_MODEL);
+}
+
 function buildAiRequest(prompt: string, systemPrompt?: string) {
   const provider = resolveAiProvider();
 
@@ -74,12 +79,23 @@ function buildAiRequest(prompt: string, systemPrompt?: string) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${AI_API_TOKEN}`,
       },
-      body: {
-        messages: [
-          ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
-          { role: "user", content: prompt },
-        ],
-      },
+      body: isCloudflareOpenAiModel()
+        ? {
+            input: [
+              ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+              { role: "user", content: prompt },
+            ],
+            reasoning: {
+              effort: ["low", "medium", "high"].includes(AI_REASONING_EFFORT) ? AI_REASONING_EFFORT : "low",
+            },
+          }
+        : {
+            messages: [
+              ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+              { role: "user", content: prompt },
+            ],
+            max_tokens: 512,
+          },
     };
   }
 
@@ -123,10 +139,61 @@ function buildAiRequest(prompt: string, systemPrompt?: string) {
 function extractAiText(data: {
   message?: { content?: unknown };
   response?: unknown;
-  result?: { response?: unknown };
+  output_text?: unknown;
+  output?: Array<{ content?: Array<{ text?: unknown }> }>;
+  choices?: Array<{ message?: { content?: unknown } }>;
+  result?: {
+    response?: unknown;
+    output_text?: unknown;
+    output?: Array<{ content?: Array<{ text?: unknown }> }>;
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
 }) {
+  const result = data.result;
+  if (typeof result?.output_text === "string") {
+    return result.output_text;
+  }
+  if (typeof data.output_text === "string") {
+    return data.output_text;
+  }
+  const resultChoiceContent = result?.choices?.[0]?.message?.content;
+  if (typeof resultChoiceContent === "string" && resultChoiceContent.trim()) {
+    return resultChoiceContent;
+  }
+  if (Array.isArray(resultChoiceContent)) {
+    const text = resultChoiceContent
+      .map((item) => typeof item === "object" && item && "text" in item ? String((item as { text?: unknown }).text || "") : "")
+      .join("")
+      .trim();
+    if (text) return text;
+  }
+  const resultOutputText = result?.output?.flatMap((item) => item.content || [])
+    .map((item) => String(item.text || ""))
+    .join("")
+    .trim();
+  if (resultOutputText) {
+    return resultOutputText;
+  }
   if (typeof data.result?.response === "string") {
     return data.result.response;
+  }
+  const choiceContent = data.choices?.[0]?.message?.content;
+  if (typeof choiceContent === "string" && choiceContent.trim()) {
+    return choiceContent;
+  }
+  if (Array.isArray(choiceContent)) {
+    const text = choiceContent
+      .map((item) => typeof item === "object" && item && "text" in item ? String((item as { text?: unknown }).text || "") : "")
+      .join("")
+      .trim();
+    if (text) return text;
+  }
+  const outputText = data.output?.flatMap((item) => item.content || [])
+    .map((item) => String(item.text || ""))
+    .join("")
+    .trim();
+  if (outputText) {
+    return outputText;
   }
   if (typeof data.message?.content === "string") {
     return data.message.content;
