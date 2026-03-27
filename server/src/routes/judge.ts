@@ -29,8 +29,52 @@ import type { AuthRequest } from "../types.js";
 import { broadcast } from "../websocket.js";
 import { ensureActivityUnlocked, ensureGroupUnlocked, createHttpError, getCurrentJudgeActivity, getStudentSummary, getStudentSummaryMap, logOperation } from "../utils.js";
 
-const OLLAMA_API_URL = process.env.OLLAMA_API_URL || "https://ai.wghappy.cn/api/generate";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
+const AI_API_URL = process.env.AI_API_URL?.trim() || process.env.OLLAMA_API_URL?.trim() || "http://127.0.0.1:11434/api/chat";
+const AI_MODEL = process.env.AI_MODEL?.trim() || process.env.OLLAMA_MODEL?.trim() || "qwen3:8b";
+const AI_THINK = process.env.AI_THINK?.trim() || process.env.OLLAMA_THINK?.trim() || "";
+
+function isChatApiUrl(url: string) {
+  return /\/api\/chat(?:[/?#]|$)/i.test(url);
+}
+
+function buildAiRequestBody(prompt: string) {
+  if (isChatApiUrl(AI_API_URL)) {
+    const payload: {
+      model: string;
+      messages: Array<{ role: "user"; content: string }>;
+      stream: false;
+      think?: string;
+    } = {
+      model: AI_MODEL,
+      messages: [
+        { role: "user", content: prompt },
+      ],
+      stream: false,
+    };
+
+    if (AI_THINK) {
+      payload.think = AI_THINK;
+    }
+
+    return payload;
+  }
+
+  return {
+    model: AI_MODEL,
+    prompt,
+    stream: false,
+  };
+}
+
+function extractAiText(data: { message?: { content?: unknown }; response?: unknown }) {
+  if (typeof data.message?.content === "string") {
+    return data.message.content;
+  }
+  if (typeof data.response === "string") {
+    return data.response;
+  }
+  return "";
+}
 
 function resolveExistingPath(candidates: string[]) {
   for (const item of candidates) {
@@ -147,26 +191,23 @@ async function generateCommentByOllama(totalScore: number, customPrompt?: string
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const response = await fetch(OLLAMA_API_URL, {
+    const response = await fetch(AI_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt,
-        stream: false,
-      }),
+      body: JSON.stringify(buildAiRequestBody(prompt)),
       signal: controller.signal,
     });
 
     if (!response.ok) {
-      throw createHttpError(`Ollama 调用失败: ${response.status}`, 502);
+      throw createHttpError(`AI 调用失败: ${response.status}`, 502);
     }
 
-    const data = await response.json() as { response?: unknown };
-    if (typeof data.response !== "string") {
-      throw createHttpError("Ollama 返回格式异常", 502);
+    const data = await response.json() as { message?: { content?: unknown }; response?: unknown };
+    const rawText = extractAiText(data);
+    if (!rawText) {
+      throw createHttpError("AI 返回格式异常", 502);
     }
-    const text = normalizeAiComment(data.response);
+    const text = normalizeAiComment(rawText);
     if (!text) {
       throw createHttpError("未生成有效评语", 502);
     }
@@ -188,26 +229,23 @@ async function generateQuestionsByOllama(topic: string) {
   const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
-    const response = await fetch(OLLAMA_API_URL, {
+    const response = await fetch(AI_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt,
-        stream: false,
-      }),
+      body: JSON.stringify(buildAiRequestBody(prompt)),
       signal: controller.signal,
     });
 
     if (!response.ok) {
-      throw createHttpError(`Ollama 调用失败: ${response.status}`, 502);
+      throw createHttpError(`AI 调用失败: ${response.status}`, 502);
     }
 
-    const data = await response.json() as { response?: unknown };
-    if (typeof data.response !== "string") {
-      throw createHttpError("Ollama 返回格式异常", 502);
+    const data = await response.json() as { message?: { content?: unknown }; response?: unknown };
+    const rawText = extractAiText(data);
+    if (!rawText) {
+      throw createHttpError("AI 返回格式异常", 502);
     }
-    const questions = normalizeAiQuestions(data.response);
+    const questions = normalizeAiQuestions(rawText);
     if (!questions.length) {
       throw createHttpError("未生成有效问题", 502);
     }

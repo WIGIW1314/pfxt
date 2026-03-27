@@ -75,7 +75,20 @@ DATABASE_URL="file:./prisma/dev.db"
 JWT_SECRET="replace-with-a-random-string-longer-than-32-characters"
 CORS_ORIGIN="http://localhost:5173,http://localhost:5174"
 PORT=3100
+AI_API_URL="http://127.0.0.1:11434/api/chat"
+AI_MODEL="gpt-oss:20b"
+# 仅在模型/服务支持时再配置；不支持就留空或删除
+AI_THINK="low"
 ```
+
+说明 / Notes:
+
+- `AI_API_URL` 默认支持 Ollama 兼容接口。若地址是 `/api/chat`，后端会按聊天格式发送 `messages`。  
+  `AI_API_URL` supports Ollama-compatible endpoints. If the URL points to `/api/chat`, the backend sends chat-style `messages`.
+- `AI_THINK` 是可选项。只有配置了该环境变量时，后端才会把 `think` 字段一并传给模型。  
+  `AI_THINK` is optional. The backend includes the `think` field only when this env var is configured.
+- 兼容旧变量名 `OLLAMA_API_URL`、`OLLAMA_MODEL`、`OLLAMA_THINK`，但建议后续统一使用 `AI_*`。  
+  Legacy env names `OLLAMA_API_URL`, `OLLAMA_MODEL`, and `OLLAMA_THINK` are still supported, but `AI_*` is recommended going forward.
 
 ### 3. 启动开发环境 / Start development
 
