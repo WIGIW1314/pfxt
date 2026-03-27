@@ -141,10 +141,11 @@ function normalizeAiComment(raw: string) {
     .split("|")
     .map((item) => item.trim().replace(/^[，,;；。、]+|[，,;；。、]+$/g, ""))
     .filter(Boolean)
-    .filter((item) => item.length <= 20);
+    .filter((item) => item.length >= 6)
+    .filter((item) => item.length <= 32);
 
   if (parts.length >= 2) {
-    return parts.slice(0, 3).join("；");
+    return parts.slice(0, 2).join("；");
   }
 
   if (parts.length === 1) {
@@ -155,7 +156,9 @@ function normalizeAiComment(raw: string) {
     .replace(/[。.!！？?]/g, "")
     .replace(/[；;]/g, "；")
     .replace(/[，,]{2,}/g, "，")
-    .slice(0, 20);
+    .replace(/[,，;；、]+$/g, "")
+    .slice(0, 36)
+    .replace(/[，,;；、]+$/g, "");
 
   return fallback || "教学思路清晰，整体表现自然";
 }
@@ -245,7 +248,7 @@ function buildCommentPrompt(params: {
       ? `额外要求：${params.customPrompt}`
       : "要求：结合分数高低判断学生表现，评语要贴合具体表现，不要空泛套话。",
     getCommentToneGuide(params.totalScore),
-    "输出要求：每句10到20字；句意完整自然；不要换行；不要编号；不要解释；句子之间用中文分号连接，不要用句号；只输出最终评语。",
+    "输出要求：每句12到28字；句意必须完整自然；不要半句停住；不要换行；不要编号；不要解释；句子之间用中文分号连接，不要用句号；只输出最终评语。",
   ];
 
   if (params.scoreDetails?.length) {
