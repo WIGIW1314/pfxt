@@ -29,69 +29,138 @@ import type { AuthRequest } from "../types.js";
 import { broadcast } from "../websocket.js";
 import { ensureActivityUnlocked, ensureGroupUnlocked, createHttpError, getCurrentJudgeActivity, getStudentSummary, getStudentSummaryMap, logOperation } from "../utils.js";
 
-const AI_API_URL = process.env.AI_API_URL?.trim() || process.env.OLLAMA_API_URL?.trim() || "http://127.0.0.1:11434/api/chat";
-const AI_MODEL = process.env.AI_MODEL?.trim() || process.env.OLLAMA_MODEL?.trim() || "gpt-oss:20b";
-const AI_THINK = process.env.AI_THINK?.trim() || process.env.OLLAMA_THINK?.trim() || "";
+const AI_ACCOUNT_ID = process.env.AI_ACCOUNT_ID?.trim() || "d393ec555236137e543d5c1555e4475e";
+const AI_API_TOKEN = process.env.API_TOKEN?.trim() || process.env.AI_API_TOKEN?.trim() || "";
+const AI_MODEL = process.env.AI_MODEL?.trim() || "@cf/openai/gpt-oss-20b";
+const AI_REASONING_EFFORT = process.env.AI_REASONING_EFFORT?.trim() || "";
+const AI_REASONING_SUMMARY = process.env.AI_REASONING_SUMMARY?.trim() || "";
 const COMMENT_SYSTEM_PROMPT = "你是教学评分系统里的评语生成器。只输出可直接写入评分表的中文评语正文。禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；禁止出现“你的”“您的”“学生的”“该生的”“选手的”等第二人称或领属说法；禁止输出称呼、解释、分析过程、客套话、标题、引号、项目符号；必须是完整短句。";
 const QUESTION_SYSTEM_PROMPT = "你是师范生模拟讲课评分现场的评委提问生成器。提问对象是大学生师范生，不是成熟教师。问题必须紧扣试讲主题和课堂片段，难度适中，适合讲课结束后的现场追问。只输出可直接提问的中文问题文本，禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
 
-function isChatApiUrl(url: string) {
-  return /\/api\/chat(?:[/?#]|$)/i.test(url);
+function buildAiResponsesUrl() {
+  return `https://api.cloudflare.com/client/v4/accounts/${AI_ACCOUNT_ID}/ai/v1/responses`;
 }
 
 function buildAiRequest(prompt: string, systemPrompt?: string) {
-  if (isChatApiUrl(AI_API_URL)) {
-    const payload: {
-      model: string;
-      messages: Array<{ role: "system" | "user"; content: string }>;
-      stream: false;
-      think?: string;
-    } = {
-      model: AI_MODEL,
-      messages: [
-        ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
-        { role: "user", content: prompt },
-      ],
-      stream: false,
-    };
+  if (!AI_API_TOKEN) {
+    throw createHttpError("AI 服务未配置 API_TOKEN", 500);
+  }
 
-    if (AI_THINK) {
-      payload.think = AI_THINK;
-    }
-
-    return {
-      url: AI_API_URL,
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    };
+  const reasoning: Record<string, string> = {};
+  if (AI_REASONING_EFFORT) {
+    reasoning.effort = AI_REASONING_EFFORT;
+  }
+  if (AI_REASONING_SUMMARY) {
+    reasoning.summary = AI_REASONING_SUMMARY;
   }
 
   return {
-    url: AI_API_URL,
-    headers: { "Content-Type": "application/json" },
+    url: buildAiResponsesUrl(),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${AI_API_TOKEN}`,
+    },
     body: {
       model: AI_MODEL,
-      prompt,
-      stream: false,
+      ...(systemPrompt ? { instructions: systemPrompt } : {}),
+      input: prompt,
+      ...(Object.keys(reasoning).length ? { reasoning } : {}),
     },
   };
 }
 
 function extractAiText(data: {
   message?: { content?: unknown };
+  output_text?: unknown;
+  output?: Array<{
+    role?: string;
+    type?: string;
+    content?: Array<{ text?: string; type?: string }>;
+  }>;
   response?: unknown;
-  result?: { response?: unknown };
+  result?: {
+    response?: unknown;
+    output_text?: unknown;
+    output?: Array<{
+      role?: string;
+      type?: string;
+      content?: Array<{ text?: string; type?: string }>;
+    }>;
+  };
 }) {
+  const extractMessageOutputText = (items?: Array<{
+    role?: string;
+    type?: string;
+    content?: Array<{ text?: string; type?: string }>;
+  }>) => {
+    if (!Array.isArray(items)) {
+      return "";
+    }
+
+    const assistantMessage = items.find((item) => item?.type === "message" || item?.role === "assistant");
+    if (!assistantMessage || !Array.isArray(assistantMessage.content)) {
+      return "";
+    }
+
+    return assistantMessage.content
+      .filter((item) => item?.type === "output_text" || item?.type === "text" || !item?.type)
+      .map((item) => typeof item.text === "string" ? item.text : "")
+      .filter(Boolean)
+      .join("");
+  };
+
+  const topLevelMessageText = extractMessageOutputText(data.output);
+  if (topLevelMessageText) {
+    return topLevelMessageText;
+  }
+
+  if (typeof data.output_text === "string") {
+    return data.output_text;
+  }
   if (typeof data.result?.response === "string") {
     return data.result.response;
   }
-  if (typeof data.message?.content === "string") {
-    return data.message.content;
+  if (typeof data.result?.output_text === "string") {
+    return data.result.output_text;
   }
   if (typeof data.response === "string") {
     return data.response;
   }
+  const nestedMessageText = extractMessageOutputText(data.result?.output);
+  if (nestedMessageText) {
+    return nestedMessageText;
+  }
+  if (typeof data.message?.content === "string") {
+    return data.message.content;
+  }
   return "";
+}
+
+function extractAiErrorMessage(data: unknown) {
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+
+  const message = "message" in data && typeof data.message === "string" ? data.message : "";
+  if (message) {
+    return message;
+  }
+
+  const errors = "errors" in data && Array.isArray(data.errors) ? data.errors : [];
+  const firstError = errors.find((item) => item && typeof item === "object" && "message" in item && typeof item.message === "string");
+  if (firstError && typeof firstError.message === "string") {
+    return firstError.message;
+  }
+
+  return "";
+}
+
+function logAiPayload(label: string, payload: unknown) {
+  try {
+    console.log(`[${label}] ${JSON.stringify(payload, null, 2)}`);
+  } catch {
+    console.log(`[${label}]`, payload);
+  }
 }
 
 function resolveExistingPath(candidates: string[]) {
@@ -169,6 +238,7 @@ function normalizeAiComment(raw: string) {
     .map((item) => item.replace(/^(高分评语|中分评语|低分评语|评语示例|评语|评价|建议|结果)[:：]/, ""))
     .map((item) => item.replace(/^句[0-9一二三四五六七八九十]+[:：]/, ""))
     .map((item) => item.replace(/^(你的|您的|学生的|该生的|选手的)/, ""))
+    .filter((item) => !looksLikeInvalidComment(item))
     .filter(Boolean)
     .filter((item) => item.length >= 6)
     .filter((item) => item.length <= 32);
@@ -189,7 +259,39 @@ function normalizeAiComment(raw: string) {
     .slice(0, 36)
     .replace(/[，,;；、]+$/g, "");
 
+  if (looksLikeInvalidComment(fallback)) {
+    return "";
+  }
+
   return fallback || "教学思路清晰，整体表现自然";
+}
+
+function looksLikeInvalidComment(text: string) {
+  const value = String(text || "").trim();
+  if (!value) return true;
+
+  const chineseCharCount = (value.match(/[\u4e00-\u9fa5]/g) || []).length;
+  if (chineseCharCount < 4) {
+    return true;
+  }
+
+  if (/\d+\s*\/\s*\d+/.test(value)) {
+    return true;
+  }
+
+  if (/(总分|满分|得分|评分|分项|分数|提问)/.test(value) && /\d/.test(value)) {
+    return true;
+  }
+
+  if (/[:：]/.test(value) && /\d/.test(value)) {
+    return true;
+  }
+
+  if ((value.match(/\d/g) || []).length >= 4) {
+    return true;
+  }
+
+  return false;
 }
 
 function normalizeAiQuestions(raw: string) {
@@ -322,6 +424,7 @@ function buildCommentPrompt(params: {
     "要求：结合分数高低判断学生表现，评语要贴合具体表现，不要空泛套话。",
     getCommentToneGuide(params.totalScore),
     "输出要求：每句12到28字；句意必须完整自然；不要半句停住；不要换行；不要编号；不要解释；不要出现“你的”“您的”“学生的”“该生的”这类说法；禁止出现任何英文单词、英文缩写、英文字母或中英混排；句子之间用中文分号连接，不要用句号；只输出最终评语。",
+    "特别禁止：不要照抄分数、不要输出83/100这类比例、不要输出评分项列表、不要输出“提问7/10”这类字段片段、不要复述题面。",
   ];
 
   if (params.scoreDetails?.length) {
@@ -347,7 +450,38 @@ function buildCommentPrompt(params: {
   return lines.join("\n");
 }
 
-async function generateCommentByOllama(params: {
+function buildFallbackComment(params: {
+  totalScore: number;
+  scoreDetails?: Array<{
+    name: string;
+    maxScore: number;
+    scoreValue: number;
+    description?: string | null;
+  }>;
+}) {
+  const summary = params.scoreDetails?.length ? summarizeScoreDetails(params.scoreDetails) : { strengths: [] as string[], weaknesses: [] as string[] };
+  const strengths = summary.strengths.slice(0, 2);
+  const weaknesses = summary.weaknesses.slice(0, 1);
+
+  let lead = "教学思路较清晰，整体表现比较稳妥";
+  if (params.totalScore < 60) {
+    lead = "课堂呈现还有明显不足，教学基本功仍需加强";
+  } else if (params.totalScore < 70) {
+    lead = "课堂完成度一般，教学处理还不够扎实";
+  } else if (params.totalScore < 80) {
+    lead = "教学思路基本清楚，课堂呈现较为平稳";
+  } else if (params.totalScore < 90) {
+    lead = "教学思路较清晰，课堂呈现比较稳妥";
+  } else {
+    lead = "课堂组织较成熟，教学呈现自然流畅";
+  }
+
+  const highlight = strengths.length ? `，${strengths.join("、")}表现较好` : "";
+  const improvement = weaknesses.length ? `；若能继续加强${weaknesses.join("、")}，课堂效果会更完整` : "";
+  return `${lead}${highlight}${improvement}`;
+}
+
+async function generateCommentByAi(params: {
   totalScore: number;
   scoreDetails?: Array<{
     name: string;
@@ -370,31 +504,32 @@ async function generateCommentByOllama(params: {
     });
 
     if (!response.ok) {
-      throw createHttpError(`AI 调用失败: ${response.status}`, 502);
+      const errorData = await response.json().catch(() => null);
+      logAiPayload("AI comment error response", errorData);
+      const detail = extractAiErrorMessage(errorData);
+      throw createHttpError(detail ? `AI 调用失败: ${response.status}，${detail}` : `AI 调用失败: ${response.status}`, 502);
     }
 
     const data = await response.json() as { message?: { content?: unknown }; response?: unknown; result?: { response?: unknown } };
+    logAiPayload("AI comment full response", data);
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
     }
     const text = normalizeAiComment(rawText);
-    if (!text) {
-      throw createHttpError("未生成有效评语", 502);
-    }
-    return text;
+    return text || buildFallbackComment(params);
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw createHttpError("AI 评语生成超时，请稍后重试", 504);
     }
     if ((err as { statusCode?: number })?.statusCode) throw err;
-    throw createHttpError("AI 服务连接失败，请检查 Ollama 是否运行", 502);
+    throw createHttpError("AI 服务连接失败，请检查 Cloudflare AI 配置", 502);
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function generateQuestionsByOllama(topic: string) {
+async function generateQuestionsByAi(topic: string) {
   const prompt = `场景：一名大学生师范生刚完成“${topic}”的模拟讲课，评委需要在试讲结束后做1到2个有针对性的现场追问。
 要求：
 1. 问题必须紧扣“${topic}”本身，不要跑题。
@@ -418,10 +553,14 @@ async function generateQuestionsByOllama(topic: string) {
     });
 
     if (!response.ok) {
-      throw createHttpError(`AI 调用失败: ${response.status}`, 502);
+      const errorData = await response.json().catch(() => null);
+      logAiPayload("AI questions error response", errorData);
+      const detail = extractAiErrorMessage(errorData);
+      throw createHttpError(detail ? `AI 调用失败: ${response.status}，${detail}` : `AI 调用失败: ${response.status}`, 502);
     }
 
     const data = await response.json() as { message?: { content?: unknown }; response?: unknown; result?: { response?: unknown } };
+    logAiPayload("AI questions full response", data);
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
@@ -436,7 +575,7 @@ async function generateQuestionsByOllama(topic: string) {
       throw createHttpError("AI 问题生成超时，请稍后重试", 504);
     }
     if ((err as { statusCode?: number })?.statusCode) throw err;
-    throw createHttpError("AI 服务连接失败，请检查 Ollama 是否运行", 502);
+    throw createHttpError("AI 服务连接失败，请检查 Cloudflare AI 配置", 502);
   } finally {
     clearTimeout(timer);
   }
@@ -1719,7 +1858,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
       }
     }
 
-    const comment = await generateCommentByOllama({
+    const comment = await generateCommentByAi({
       totalScore: Number(body.totalScore),
       scoreDetails,
     });
@@ -1732,7 +1871,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     const topic = String(body.topic || "师范生面试问题").trim() || "师范生面试问题";
 
     await ensureJudgeAccess(activityId, studentId, request.user.userId);
-    const questions = await generateQuestionsByOllama(topic);
+    const questions = await generateQuestionsByAi(topic);
     return { questions };
   });
 

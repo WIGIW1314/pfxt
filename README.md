@@ -75,21 +75,26 @@ DATABASE_URL="file:./prisma/dev.db"
 JWT_SECRET="replace-with-a-random-string-longer-than-32-characters"
 CORS_ORIGIN="http://localhost:5173,http://localhost:5174"
 PORT=3100
-AI_API_URL="http://127.0.0.1:11434/api/chat"
-AI_MODEL="gpt-oss:20b"
-# 仅在模型/服务支持时再配置；不支持就留空或删除
-AI_THINK="low"
+AI_MODEL="@cf/openai/gpt-oss-20b"
+API_TOKEN="your-cloudflare-api-token"
+# 可选：不填时默认使用当前项目接入的 Cloudflare account id
+AI_ACCOUNT_ID="d393ec555236137e543d5c1555e4475e"
+# 可选：gpt-oss 推理强度，可用 low / medium / high
+AI_REASONING_EFFORT="medium"
+# 可选：推理摘要级别，可用 auto / concise / detailed
+AI_REASONING_SUMMARY="auto"
 ```
 
 说明 / Notes:
 
-- `AI_API_URL` 默认按本地 Ollama 使用。若地址是 `/api/chat`，后端会按聊天格式发送 `messages`；否则按传统 `prompt` 方式发送。  
-  `AI_API_URL` is designed for local Ollama by default. If the URL points to `/api/chat`, the backend sends chat-style `messages`; otherwise it falls back to a classic `prompt` payload.
-
-- `AI_THINK` 是可选项。只有配置了该环境变量时，后端才会把 `think` 字段一并传给模型。  
-  `AI_THINK` is optional. The backend includes the `think` field only when this env var is configured.
-- 兼容旧变量名 `OLLAMA_API_URL`、`OLLAMA_MODEL`、`OLLAMA_THINK`，但建议后续统一使用 `AI_*`。  
-  Legacy env names `OLLAMA_API_URL`, `OLLAMA_MODEL`, and `OLLAMA_THINK` are still supported, but `AI_*` is recommended going forward.
+- 后端 AI 请求现在按 Cloudflare `gpt-oss-20b` 官方文档使用 Responses API：`/ai/v1/responses`，并发送 `model`、`instructions`、`input`。  
+  The backend now uses Cloudflare's native Responses API for `gpt-oss-20b` at `/ai/v1/responses`, sending `model`, `instructions`, and `input`.
+- `API_TOKEN` 必填，需具备调用对应 Cloudflare AI 模型的权限。  
+  `API_TOKEN` is required and must be authorized to call the target Cloudflare AI model.
+- `AI_ACCOUNT_ID` 是可选项；如果你接入的是别的 Cloudflare 账号，可以覆盖默认值。  
+  `AI_ACCOUNT_ID` is optional; override it when you want to use a different Cloudflare account.
+- `AI_REASONING_EFFORT` 和 `AI_REASONING_SUMMARY` 都是可选项，仅在需要时传给 `gpt-oss-20b` 的 `reasoning` 配置。  
+  `AI_REASONING_EFFORT` and `AI_REASONING_SUMMARY` are optional and are only included when you want to configure `gpt-oss-20b` reasoning behavior.
 
 ### 3. 启动开发环境 / Start development
 
