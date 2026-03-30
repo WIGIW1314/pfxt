@@ -15,6 +15,7 @@ import { api, API_BASE } from "../api";
 import { formatBJ } from "../date";
 import AppShell from "../components/AppShell.vue";
 import { useModalHistory } from "../composables/useModalHistory";
+import { matchesSearchKeyword } from "../utils/search";
 
 const DocViewer = defineAsyncComponent(() => import("../components/DocViewer.vue"));
 const PUBLIC_REFRESH_EVENTS = new Set([
@@ -48,21 +49,19 @@ const activeTemplate = computed(() => {
 const studentSearch = ref("");
 const filteredGroups = computed(() => {
   const groups = activity.value?.groups || [];
-  const keyword = studentSearch.value.trim().toLowerCase();
+  const keyword = studentSearch.value.trim();
   if (!keyword) return groups;
   return groups
     .map((group: any) => ({
       ...group,
       students: (group.students || []).filter((s: any) =>
-        [s.name, s.studentNo, s.className, s.customRole?.name]
-          .filter(Boolean)
-          .some((v: string) => v.toLowerCase().includes(keyword)),
+        matchesSearchKeyword([s.name, s.studentNo, s.className, s.customRole?.name], keyword),
       ),
     }))
     .filter((group: any) => group.students.length > 0);
 });
 const matchCount = computed(() => {
-  const keyword = studentSearch.value.trim().toLowerCase();
+  const keyword = studentSearch.value.trim();
   if (!keyword) return 0;
   return filteredGroups.value.reduce((sum: number, g: any) => sum + g.students.length, 0);
 });
@@ -214,7 +213,7 @@ function hasRoleDuty(student: any) {
         <div class="public-search-bar">
           <el-input
             v-model="studentSearch"
-            placeholder="搜索学生姓名、学号、班级、角色…"
+              placeholder="搜索学生姓名、学号、班级、角色、拼音…"
             clearable
             :prefix-icon="Search"
             size="default"

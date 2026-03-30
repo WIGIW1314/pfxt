@@ -9,6 +9,7 @@ import { useAuthStore } from "../stores/auth";
 import { formatBJ } from "../date";
 import { useSyncStore } from "../stores/sync";
 import { useModalHistory } from "../composables/useModalHistory";
+import { matchesSearchKeyword } from "../utils/search";
 import type { Activity, ActivityCustomRole, Group, ScoreTemplate, Student } from "../types";
 
 const ImportDialog = defineAsyncComponent(() => import("../components/ImportDialog.vue"));
@@ -203,15 +204,14 @@ const resultGroupOptions = computed(() => {
     .sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
 });
 const filteredResults = computed(() => {
-  const keyword = resultKeyword.value.trim().toLowerCase();
+  const keyword = resultKeyword.value.trim();
   return results.value.filter((row) => {
     const submittedJudgeCount = row.summary?.submittedJudgeCount ?? 0;
     const finalScore = row.summary?.finalScore;
-    const matchesKeyword =
-      !keyword ||
-      [row.name, row.studentNo, row.className, row.group?.name, row.orderNo, row.rankNo]
-        .filter((item) => item != null && item !== "")
-        .some((item) => String(item).toLowerCase().includes(keyword));
+    const matchesKeyword = matchesSearchKeyword(
+      [row.name, row.studentNo, row.className, row.group?.name, row.orderNo, row.rankNo],
+      keyword,
+    );
     const matchesGroup = !resultGroupFilter.value || row.group?.id === resultGroupFilter.value;
     const matchesStatus =
       resultStatusFilter.value === "ALL" ||
@@ -1450,9 +1450,10 @@ async function batchToggleGroups(lock: boolean) {
 const groupJudgeTarget = computed(() => groups.value.find((g) => g.id === groupJudgeTargetId.value) || null);
 const groupJudgeExistingUserIds = computed(() => new Set((groupJudgeTarget.value?.activityRoles || []).map((r) => r.userId)));
 const filteredSystemUsers = computed(() => {
-  const kw = groupJudgeSearch.value.toLowerCase();
   return systemUsers.value.filter(
-    (u) => !groupJudgeExistingUserIds.value.has(u.id) && (u.username.toLowerCase().includes(kw) || u.realName.toLowerCase().includes(kw)),
+    (u) =>
+      !groupJudgeExistingUserIds.value.has(u.id) &&
+      matchesSearchKeyword([u.username, u.realName], groupJudgeSearch.value),
   );
 });
 
@@ -2405,30 +2406,27 @@ onUnmounted(() => {
 
     <template v-else-if="section === 'results'">
       <section class="glass-panel admin-results-panel">
-        <div class="panel-header">
-          <h3 style="margin: 0">结果汇总</h3>
+        <div class="results-toolbar-head">
+          <div class="results-toolbar-title">
+            <h3 style="margin: 0">结果汇总</h3>
+            <div class="results-toolbar-count">
+              <span>共 {{ results.length }} 条</span>
+              <span>当前 {{ filteredResults.length }} 条</span>
+              <span class="results-toolbar-hint">支持姓名、分组的首字母和全拼搜索</span>
+            </div>
+          </div>
           <el-button type="primary" @click="downloadFile(`/api/admin/activities/${activityId}/export/results`, 'results.xlsx')">导出 Excel</el-button>
         </div>
-        <div class="results-toolbar-meta">
-          <div class="muted">支持按学生信息、分组、评分进度和分数区间快速筛选。</div>
-          <div class="results-toolbar-count">
-            <span>共 {{ results.length }} 条</span>
-            <span>当前 {{ filteredResults.length }} 条</span>
-          </div>
-        </div>
         <div class="results-toolbar">
-          <div class="results-filter-field results-filter-field-search">
-            <div class="results-filter-label">搜索</div>
-            <el-input
-              v-model="resultKeyword"
-              clearable
-              :prefix-icon="Search"
-              placeholder="搜索姓名、学号、班级、分组"
-            />
-          </div>
+          <el-input
+            v-model="resultKeyword"
+            class="results-filter-search-input"
+            clearable
+            :prefix-icon="Search"
+            placeholder="搜索姓名、学号、班级、分组或拼音"
+          />
           <div class="results-filter-field">
-            <div class="results-filter-label">分组</div>
-            <el-select v-model="resultGroupFilter" placeholder="全部分组">
+            <el-select v-model="resultGroupFilter" placeholder="分组">
               <el-option label="全部分组" value="" />
               <el-option
                 v-for="group in resultGroupOptions"
@@ -2439,8 +2437,7 @@ onUnmounted(() => {
             </el-select>
           </div>
           <div class="results-filter-field">
-            <div class="results-filter-label">进度</div>
-            <el-select v-model="resultStatusFilter" placeholder="全部进度">
+            <el-select v-model="resultStatusFilter" placeholder="进度">
               <el-option
                 v-for="item in resultStatusOptions"
                 :key="item.value"
@@ -2450,8 +2447,7 @@ onUnmounted(() => {
             </el-select>
           </div>
           <div class="results-filter-field">
-            <div class="results-filter-label">分数</div>
-            <el-select v-model="resultScoreFilter" placeholder="全部分数">
+            <el-select v-model="resultScoreFilter" placeholder="分数">
               <el-option
                 v-for="item in resultScoreOptions"
                 :key="item.value"
@@ -2460,9 +2456,7 @@ onUnmounted(() => {
               />
             </el-select>
           </div>
-          <div class="results-filter-actions">
-            <el-button plain @click="clearResultFilters">重置筛选</el-button>
-          </div>
+          <el-button class="results-filter-reset" plain @click="clearResultFilters">重置</el-button>
         </div>
         <div ref="resultsScrollRef" class="admin-results-scroll" @scroll="handleResultsScroll">
           <template v-if="paginatedResults.length">
@@ -2742,7 +2736,7 @@ onUnmounted(() => {
           <span v-if="!groupJudgeTarget?.activityRoles?.length" class="muted">暂无评委</span>
         </div>
       </div>
-      <el-input v-model="groupJudgeSearch" placeholder="搜索用户名或姓名" style="margin-bottom: 8px" />
+      <el-input v-model="groupJudgeSearch" placeholder="搜索用户名、姓名或拼音" style="margin-bottom: 8px" />
       <div style="max-height: 320px; overflow-y: auto">
         <div v-for="user in filteredSystemUsers" :key="user.id" class="glass-panel entity-card" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; margin-bottom: 4px">
           <div>
@@ -2873,59 +2867,71 @@ onUnmounted(() => {
 
 <style scoped>
 .admin-results-panel {
-  padding: 12px;
+  padding: 10px 12px 12px;
   display: flex;
   flex-direction: column;
   height: 100%;
+  gap: 10px;
 }
 
-.results-toolbar-meta {
+.results-toolbar-head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  margin: 12px 0 10px;
+}
+
+.results-toolbar-title {
+  min-width: 0;
 }
 
 .results-toolbar-count {
   display: flex;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
   color: var(--el-text-color-regular);
-  font-size: 13px;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.results-toolbar-count span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(64, 158, 255, 0.12);
+}
+
+.results-toolbar-hint {
+  color: var(--el-text-color-secondary);
+  max-width: 100%;
 }
 
 .results-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr)) auto;
-  gap: 12px;
-  align-items: end;
-  margin-bottom: 14px;
+  grid-template-columns: minmax(240px, 2.2fr) repeat(3, minmax(120px, 1fr)) auto;
+  gap: 10px;
+  align-items: center;
 }
 
 .results-filter-field {
   min-width: 0;
 }
 
-.results-filter-field-search {
-  grid-column: span 2;
+.results-filter-search-input {
+  min-width: 0;
 }
 
-.results-filter-label {
-  margin-bottom: 6px;
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
+.results-filter-search-input :deep(.el-input__wrapper),
 .results-filter-field :deep(.el-input),
 .results-filter-field :deep(.el-select) {
   width: 100%;
 }
 
-.results-filter-actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-end;
+.results-filter-reset {
+  min-width: 84px;
 }
 
 .admin-results-scroll {
@@ -2976,33 +2982,29 @@ onUnmounted(() => {
 
 @media (max-width: 1080px) {
   .results-toolbar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .results-filter-field-search {
-    grid-column: span 2;
+    grid-template-columns: minmax(0, 1.8fr) repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
-  .results-toolbar-meta {
+  .results-toolbar-head {
     flex-direction: column;
     align-items: flex-start;
   }
 
   .results-toolbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .results-filter-field-search {
-    grid-column: span 1;
+  .results-filter-search-input {
+    grid-column: span 2;
   }
 
-  .results-filter-actions {
-    justify-content: stretch;
+  .results-toolbar-count span {
+    padding: 0 8px;
   }
 
-  .results-filter-actions :deep(.el-button) {
+  .results-filter-reset {
     width: 100%;
   }
 }

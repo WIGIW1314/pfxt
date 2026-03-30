@@ -10,6 +10,7 @@ import { useSyncStore } from "../stores/sync";
 import { formatBJ } from "../date";
 import { useModalHistory } from "../composables/useModalHistory";
 import { distributeScore } from "../score-distribute";
+import { matchesSearchKeyword } from "../utils/search";
 import type { ScoreTemplate, Student } from "../types";
 
 const ScoreDialog = defineAsyncComponent(() => import("../components/ScoreDialog.vue"));
@@ -101,10 +102,9 @@ const lockReason = computed(() => {
 });
 const avgDecimalPlaces = computed(() => Number(currentActivity.value?.activity?.avgDecimalPlaces ?? 2));
 const isTotalOnly = computed(() => template.value?.scoreMode === "TOTAL" || !template.value?.items?.length);
-const normalizedKeyword = computed(() => keyword.value.trim().toLowerCase());
 const filteredStudents = computed(() =>
   students.value.filter((student) =>
-    [student.name, student.studentNo, student.className].join(" ").toLowerCase().includes(normalizedKeyword.value),
+    matchesSearchKeyword([student.name, student.studentNo, student.className], keyword.value),
   ),
 );
 const dirtyStudentIds = reactive(new Set<string>());
@@ -873,7 +873,7 @@ onBeforeRouteUpdate(async () => {
       <section class="glass-panel" style="padding: 12px">
         <div class="panel-header">
           <h3 style="margin: 0">学生列表</h3>
-          <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级" />
+            <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级/拼音" />
         </div>
           <div class="card-list">
             <div v-for="student in filteredStudents" :key="student.id" class="glass-panel entity-card judge-student-card">
@@ -953,7 +953,7 @@ onBeforeRouteUpdate(async () => {
         <div class="judge-toolbar-shell">
           <div class="judge-toolbar-search-block">
             <div class="judge-toolbar-label">快速检索</div>
-            <el-input v-model="keyword" class="judge-toolbar-search" placeholder="搜索姓名、学号或班级">
+              <el-input v-model="keyword" class="judge-toolbar-search" placeholder="搜索姓名、学号、班级或拼音">
               <template #prefix>
                 <el-icon><Search /></el-icon>
               </template>
