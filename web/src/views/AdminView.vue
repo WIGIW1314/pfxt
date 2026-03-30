@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
+import { Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Search, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
 import AppShell from "../components/AppShell.vue";
 import { api, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
@@ -26,7 +26,6 @@ const groups = ref<Group[]>([]);
 const students = ref<Student[]>([]);
 const judges = ref<any[]>([]);
 const templates = ref<ScoreTemplate[]>([]);
-const results = ref<any[]>([]);
 const logs = ref<any[]>([]);
 const customRoles = ref<ActivityCustomRole[]>([]);
 
@@ -64,6 +63,30 @@ type OnlineUser = {
   groupId: string | null;
   groupName: string | null;
 };
+type ResultSummary = {
+  requiredJudgeCount: number;
+  submittedJudgeCount: number;
+  avgScore: number | null;
+  finalScore: number | null;
+  isComplete: boolean;
+};
+type ResultRow = {
+  id: string;
+  activityId: string;
+  groupId: string;
+  studentNo: string;
+  name: string;
+  gender?: string | null;
+  className?: string | null;
+  orderNo: number;
+  rankNo: number;
+  group?: {
+    id: string;
+    name: string;
+  } | null;
+  summary: ResultSummary | null;
+};
+const results = ref<ResultRow[]>([]);
 const activeTemplate = computed(
   () =>
     templates.value.find((item) => item.id === currentActivity.value?.activeTemplateId) ||
@@ -144,17 +167,76 @@ const resultCurrentPage = ref(1);
 const resultPageSize = ref(24);
 const resultsScrollRef = ref<HTMLElement | null>(null);
 const showResultsBackTop = ref(false);
+const resultKeyword = ref("");
+const resultGroupFilter = ref("");
+const resultStatusFilter = ref("ALL");
+const resultScoreFilter = ref("ALL");
+const resultStatusOptions = [
+  { label: "全部进度", value: "ALL" },
+  { label: "已完成", value: "COMPLETED" },
+  { label: "进行中", value: "IN_PROGRESS" },
+  { label: "未开始", value: "PENDING" },
+];
+const resultScoreOptions = [
+  { label: "全部分数", value: "ALL" },
+  { label: "90 分及以上", value: "EXCELLENT" },
+  { label: "80 - 89 分", value: "GOOD" },
+  { label: "60 - 79 分", value: "PASS" },
+  { label: "60 分以下", value: "FAILED" },
+  { label: "暂无最终分", value: "NO_SCORE" },
+];
 const resultPaginationLayout = computed(() =>
   isCompactResultPagination.value ? "prev, pager, next" : "total, sizes, prev, pager, next, jumper",
 );
 const resultPaginationSizes = computed(() =>
   isCompactResultPagination.value ? [12, 24, 48] : [12, 24, 48, 96],
 );
+const resultGroupOptions = computed(() => {
+  const groupMap = new Map<string, string>();
+  results.value.forEach((row) => {
+    if (row.group?.id) {
+      groupMap.set(row.group.id, row.group.name);
+    }
+  });
+  return Array.from(groupMap.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "zh-CN"));
+});
+const filteredResults = computed(() => {
+  const keyword = resultKeyword.value.trim().toLowerCase();
+  return results.value.filter((row) => {
+    const submittedJudgeCount = row.summary?.submittedJudgeCount ?? 0;
+    const finalScore = row.summary?.finalScore;
+    const matchesKeyword =
+      !keyword ||
+      [row.name, row.studentNo, row.className, row.group?.name, row.orderNo, row.rankNo]
+        .filter((item) => item != null && item !== "")
+        .some((item) => String(item).toLowerCase().includes(keyword));
+    const matchesGroup = !resultGroupFilter.value || row.group?.id === resultGroupFilter.value;
+    const matchesStatus =
+      resultStatusFilter.value === "ALL" ||
+      (resultStatusFilter.value === "COMPLETED" && Boolean(row.summary?.isComplete)) ||
+      (resultStatusFilter.value === "IN_PROGRESS" && submittedJudgeCount > 0 && !row.summary?.isComplete) ||
+      (resultStatusFilter.value === "PENDING" && submittedJudgeCount === 0);
+    const matchesScore =
+      resultScoreFilter.value === "ALL" ||
+      (resultScoreFilter.value === "EXCELLENT" && finalScore != null && Number(finalScore) >= 90) ||
+      (resultScoreFilter.value === "GOOD" && finalScore != null && Number(finalScore) >= 80 && Number(finalScore) < 90) ||
+      (resultScoreFilter.value === "PASS" && finalScore != null && Number(finalScore) >= 60 && Number(finalScore) < 80) ||
+      (resultScoreFilter.value === "FAILED" && finalScore != null && Number(finalScore) < 60) ||
+      (resultScoreFilter.value === "NO_SCORE" && finalScore == null);
+    return matchesKeyword && matchesGroup && matchesStatus && matchesScore;
+  });
+});
 const paginatedResults = computed(() => {
   const start = (resultCurrentPage.value - 1) * resultPageSize.value;
-  return results.value.slice(start, start + resultPageSize.value);
+  return filteredResults.value.slice(start, start + resultPageSize.value);
 });
-watch(results, () => {
+const resultEmptyDescription = computed(() => {
+  if (!results.value.length) return "暂无评分数据";
+  return "没有符合当前筛选条件的结果";
+});
+watch([results, resultKeyword, resultGroupFilter, resultStatusFilter, resultScoreFilter], () => {
   resultCurrentPage.value = 1;
   showResultsBackTop.value = false;
 });
@@ -184,6 +266,20 @@ function scrollResultsToTop() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 }
+
+function clearResultFilters() {
+  resultKeyword.value = "";
+  resultGroupFilter.value = "";
+  resultStatusFilter.value = "ALL";
+  resultScoreFilter.value = "ALL";
+}
+
+function getResultProgressPercentage(row: ResultRow) {
+  const requiredJudgeCount = row.summary?.requiredJudgeCount ?? 0;
+  if (!requiredJudgeCount) return 0;
+  return Math.round(((row.summary?.submittedJudgeCount ?? 0) / requiredJudgeCount) * 100);
+}
+
 function formatDecimalScore(val: any) {
   if (val == null || val === "" || isNaN(val)) return "-";
   const places = currentActivity.value?.avgDecimalPlaces ?? 2;
@@ -2308,14 +2404,69 @@ onUnmounted(() => {
     </template>
 
     <template v-else-if="section === 'results'">
-      <section class="glass-panel" style="padding: 12px; display: flex; flex-direction: column; height: 100%;">
+      <section class="glass-panel admin-results-panel">
         <div class="panel-header">
           <h3 style="margin: 0">结果汇总</h3>
           <el-button type="primary" @click="downloadFile(`/api/admin/activities/${activityId}/export/results`, 'results.xlsx')">导出 Excel</el-button>
         </div>
-        <div ref="resultsScrollRef" class="admin-results-scroll" style="flex: 1; overflow-y: auto; padding-right: 4px;" @scroll="handleResultsScroll">
+        <div class="results-toolbar-meta">
+          <div class="muted">支持按学生信息、分组、评分进度和分数区间快速筛选。</div>
+          <div class="results-toolbar-count">
+            <span>共 {{ results.length }} 条</span>
+            <span>当前 {{ filteredResults.length }} 条</span>
+          </div>
+        </div>
+        <div class="results-toolbar">
+          <div class="results-filter-field results-filter-field-search">
+            <div class="results-filter-label">搜索</div>
+            <el-input
+              v-model="resultKeyword"
+              clearable
+              :prefix-icon="Search"
+              placeholder="搜索姓名、学号、班级、分组"
+            />
+          </div>
+          <div class="results-filter-field">
+            <div class="results-filter-label">分组</div>
+            <el-select v-model="resultGroupFilter" placeholder="全部分组">
+              <el-option label="全部分组" value="" />
+              <el-option
+                v-for="group in resultGroupOptions"
+                :key="group.value"
+                :label="group.label"
+                :value="group.value"
+              />
+            </el-select>
+          </div>
+          <div class="results-filter-field">
+            <div class="results-filter-label">进度</div>
+            <el-select v-model="resultStatusFilter" placeholder="全部进度">
+              <el-option
+                v-for="item in resultStatusOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </div>
+          <div class="results-filter-field">
+            <div class="results-filter-label">分数</div>
+            <el-select v-model="resultScoreFilter" placeholder="全部分数">
+              <el-option
+                v-for="item in resultScoreOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </div>
+          <div class="results-filter-actions">
+            <el-button plain @click="clearResultFilters">重置筛选</el-button>
+          </div>
+        </div>
+        <div ref="resultsScrollRef" class="admin-results-scroll" @scroll="handleResultsScroll">
           <template v-if="paginatedResults.length">
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+            <div class="results-card-grid">
               <div v-for="row in paginatedResults" :key="row.id" class="glass-panel" :style="[{ padding: '16px', borderRadius: '8px', position: 'relative', overflow: 'hidden' }, getScoreColorStyle(row.summary?.finalScore)]">
                 <div style="position: relative; z-index: 1;">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
@@ -2346,7 +2497,7 @@ onUnmounted(() => {
                     <span>{{ row.summary?.submittedJudgeCount ?? 0 }} / {{ row.summary?.requiredJudgeCount ?? 0 }} 评委</span>
                   </div>
                   <el-progress 
-                    :percentage="Math.round(((row.summary?.submittedJudgeCount ?? 0) / (row.summary?.requiredJudgeCount || 1)) * 100)" 
+                    :percentage="getResultProgressPercentage(row)" 
                     :show-text="false" 
                     :status="row.summary?.isComplete ? 'success' : (row.summary?.finalScore != null && row.summary?.finalScore < 60 ? 'exception' : '')"
                     style="margin-top: 6px;"
@@ -2355,7 +2506,7 @@ onUnmounted(() => {
               </div>
             </div>
           </template>
-          <el-empty v-else description="暂无评分数据" />
+          <el-empty v-else :description="resultEmptyDescription" />
         </div>
         <div class="results-pagination-wrap">
           <el-pagination
@@ -2364,7 +2515,7 @@ onUnmounted(() => {
             v-model:page-size="resultPageSize"
             :page-sizes="resultPaginationSizes"
             :layout="resultPaginationLayout"
-            :total="results.length"
+            :total="filteredResults.length"
             :small="isCompactResultPagination"
           />
         </div>
@@ -2721,6 +2872,74 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.admin-results-panel {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.results-toolbar-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0 10px;
+}
+
+.results-toolbar-count {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+}
+
+.results-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(140px, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.results-filter-field {
+  min-width: 0;
+}
+
+.results-filter-field-search {
+  grid-column: span 2;
+}
+
+.results-filter-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.results-filter-field :deep(.el-input),
+.results-filter-field :deep(.el-select) {
+  width: 100%;
+}
+
+.results-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.admin-results-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.results-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
 .announcement-files {
   width: 100%;
 }
@@ -2753,5 +2972,38 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+  .results-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .results-filter-field-search {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .results-toolbar-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .results-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .results-filter-field-search {
+    grid-column: span 1;
+  }
+
+  .results-filter-actions {
+    justify-content: stretch;
+  }
+
+  .results-filter-actions :deep(.el-button) {
+    width: 100%;
+  }
 }
 </style>
