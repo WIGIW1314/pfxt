@@ -860,6 +860,8 @@ async function changeCurrentActivity(nextActivityId: string) {
   try {
     await api.post(`/api/admin/activities/${nextActivityId}/activate`);
     selectedActivityId.value = nextActivityId;
+    dashboardActivityId.value = nextActivityId;
+    localStorage.setItem(ADMIN_DASHBOARD_ACTIVITY_KEY, nextActivityId);
     await auth.fetchMe();
     await fetchAll();
   } catch (error: any) {
@@ -883,14 +885,11 @@ async function changeDashboardActivity(nextActivityId: string) {
 function syncActivitySelections(list: Activity[]) {
   selectedActivityIds.value = selectedActivityIds.value.filter((id) => list.some((item) => item.id === id));
   selectedActivityId.value = list.find((item) => item.isActive)?.id || auth.currentActivityRole?.activityId || list[0]?.id || "";
-
-  if (!dashboardActivityId.value || !list.some((item) => item.id === dashboardActivityId.value)) {
-    dashboardActivityId.value = selectedActivityId.value || list[0]?.id || "";
-    if (dashboardActivityId.value) {
-      localStorage.setItem(ADMIN_DASHBOARD_ACTIVITY_KEY, dashboardActivityId.value);
-    } else {
-      localStorage.removeItem(ADMIN_DASHBOARD_ACTIVITY_KEY);
-    }
+  dashboardActivityId.value = selectedActivityId.value || list[0]?.id || "";
+  if (dashboardActivityId.value) {
+    localStorage.setItem(ADMIN_DASHBOARD_ACTIVITY_KEY, dashboardActivityId.value);
+  } else {
+    localStorage.removeItem(ADMIN_DASHBOARD_ACTIVITY_KEY);
   }
 }
 
