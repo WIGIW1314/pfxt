@@ -155,14 +155,6 @@ function extractAiErrorMessage(data: unknown) {
   return "";
 }
 
-function logAiPayload(label: string, payload: unknown) {
-  try {
-    console.log(`[${label}] ${JSON.stringify(payload, null, 2)}`);
-  } catch {
-    console.log(`[${label}]`, payload);
-  }
-}
-
 function resolveExistingPath(candidates: string[]) {
   for (const item of candidates) {
     if (fsSync.existsSync(item)) {
@@ -505,13 +497,11 @@ async function generateCommentByAi(params: {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      logAiPayload("AI comment error response", errorData);
       const detail = extractAiErrorMessage(errorData);
       throw createHttpError(detail ? `AI 调用失败: ${response.status}，${detail}` : `AI 调用失败: ${response.status}`, 502);
     }
 
     const data = await response.json() as { message?: { content?: unknown }; response?: unknown; result?: { response?: unknown } };
-    logAiPayload("AI comment full response", data);
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
@@ -556,13 +546,11 @@ async function generateQuestionsByAi(topic: string) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => null);
-      logAiPayload("AI questions error response", errorData);
       const detail = extractAiErrorMessage(errorData);
       throw createHttpError(detail ? `AI 调用失败: ${response.status}，${detail}` : `AI 调用失败: ${response.status}`, 502);
     }
 
     const data = await response.json() as { message?: { content?: unknown }; response?: unknown; result?: { response?: unknown } };
-    logAiPayload("AI questions full response", data);
     const rawText = extractAiText(data);
     if (!rawText) {
       throw createHttpError("AI 返回格式异常", 502);
