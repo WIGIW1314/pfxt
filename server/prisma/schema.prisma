@@ -57,6 +57,7 @@ model Activity {
   calcMode                     ActivityCalcMode   @default(SIMPLE_AVG)
   isActive                     Boolean            @default(true)
   isLocked                     Boolean            @default(false)
+  isPublicVisible              Boolean            @default(true)
   allowEditScore               Boolean            @default(true)
   showAvgToJudge               Boolean            @default(false)
   showPeerScoresToJudge        Boolean            @default(false)

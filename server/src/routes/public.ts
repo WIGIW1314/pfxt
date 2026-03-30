@@ -6,7 +6,7 @@ export async function registerPublicRoutes(app: FastifyInstance) {
   // 获取当前激活活动的完整公开信息（无需登录）
   app.get("/api/public/active-activity", async (_req, reply) => {
     const activity = await prisma.activity.findFirst({
-      where: { isActive: true },
+      where: { isActive: true, isPublicVisible: true },
       include: {
         groups: {
           orderBy: { sortOrder: "asc" },
@@ -31,20 +31,18 @@ export async function registerPublicRoutes(app: FastifyInstance) {
     });
 
     if (!activity) {
-      return reply.status(404).send({ message: "暂无激活的活动" });
+      return reply.status(404).send({ message: "暂无可见活动" });
     }
 
     const data = activity as any;
-
-    // announcementFiles 通过 raw query 获取（兼容未重新生成 Prisma client 的情况）
     let announcementFiles: unknown[] = [];
-    try {
-      const rows = await prisma.$queryRaw<Array<{ announcementFiles: string | null }>>`
-        SELECT "announcementFiles" FROM "Activity" WHERE "id" = ${data.id}
-      `;
-      const raw = rows[0]?.announcementFiles;
-      if (raw) announcementFiles = JSON.parse(raw);
-    } catch { /* column may not exist yet */ }
+    if (typeof data.announcementFiles === "string") {
+      try {
+        announcementFiles = JSON.parse(data.announcementFiles);
+      } catch {
+        announcementFiles = [];
+      }
+    }
 
     // 只返回公开需要的字段，不暴露敏感信息
     return {

@@ -381,6 +381,16 @@ const customRoleForm = reactive({
   sortOrder: 0,
 });
 
+type ActivityDialogMode = "create" | "edit" | "clone";
+const activityDialogMode = ref<ActivityDialogMode>("create");
+const cloningSourceActivityId = ref("");
+const activityDialogTitle = computed(() =>
+  activityDialogMode.value === "edit" ? "编辑活动" : activityDialogMode.value === "clone" ? "复制活动" : "新建活动",
+);
+const activityDialogSubmitText = computed(() =>
+  activityDialogMode.value === "edit" ? "更新" : activityDialogMode.value === "clone" ? "保存复制" : "保存",
+);
+
 const activityForm = reactive({
   name: "",
   code: "",
@@ -390,6 +400,7 @@ const activityForm = reactive({
   description: "",
   startTime: "",
   endTime: "",
+  isPublicVisible: true,
 });
 
 
@@ -633,6 +644,8 @@ function syncActivitySettings() {
 }
 
 function resetActivityForm() {
+  activityDialogMode.value = "create";
+  cloningSourceActivityId.value = "";
   editingActivityId.value = "";
   Object.assign(activityForm, {
     name: "",
@@ -643,6 +656,7 @@ function resetActivityForm() {
     description: "",
     startTime: "",
     endTime: "",
+    isPublicVisible: true,
   });
 }
 
@@ -722,10 +736,13 @@ function openEditCustomRole(role: ActivityCustomRole) {
 
 function openCreateActivity() {
   resetActivityForm();
+  activityDialogMode.value = "create";
   activityDialog.value = true;
 }
 
 function openEditActivity(activity: Activity) {
+  activityDialogMode.value = "edit";
+  cloningSourceActivityId.value = "";
   editingActivityId.value = activity.id;
   Object.assign(activityForm, {
     name: activity.name,
@@ -736,6 +753,25 @@ function openEditActivity(activity: Activity) {
     description: activity.description || "",
     startTime: activity.startTime ? formatBJ(activity.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
     endTime: activity.endTime ? formatBJ(activity.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
+    isPublicVisible: activity.isPublicVisible,
+  });
+  activityDialog.value = true;
+}
+
+function openCloneActivity(activity: Activity) {
+  resetActivityForm();
+  activityDialogMode.value = "clone";
+  cloningSourceActivityId.value = activity.id;
+  Object.assign(activityForm, {
+    name: `${activity.name}（复制）`,
+    code: `${activity.code}-copy`,
+    type: activity.type,
+    scoreMode: activity.scoreMode,
+    calcMode: activity.calcMode,
+    description: activity.description || "",
+    startTime: activity.startTime ? formatBJ(activity.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
+    endTime: activity.endTime ? formatBJ(activity.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
+    isPublicVisible: false,
   });
   activityDialog.value = true;
 }
@@ -984,23 +1020,26 @@ async function createActivity() {
     ElMessage.warning("请填写活动编码");
     return;
   }
-  const isEditing = Boolean(editingActivityId.value);
+  const isEditing = activityDialogMode.value === "edit";
+  const isCloning = activityDialogMode.value === "clone";
   const payload = {
     ...activityForm,
     startTime: activityForm.startTime || null,
     endTime: activityForm.endTime || null,
   };
   try {
-    const request = editingActivityId.value
+    const request = isEditing
       ? api.put(`/api/admin/activities/${editingActivityId.value}`, payload)
-      : api.post("/api/admin/activities", payload);
+      : isCloning
+        ? api.post(`/api/admin/activities/${cloningSourceActivityId.value}/clone`, payload)
+        : api.post("/api/admin/activities", payload);
     const response = await request;
     if (!isEditing && response?.data?.id) {
       selectedActivityId.value = response.data.id;
     }
     activityDialog.value = false;
     resetActivityForm();
-    ElMessage.success(isEditing ? "活动已更新" : "活动已创建");
+    ElMessage.success(isEditing ? "活动已更新" : isCloning ? "活动已复制" : "活动已创建");
     await fetchAll();
   } catch (err: any) {
     ElMessage.error(err?.response?.data?.message || "操作失败，请检查活动编码是否重复");
@@ -1296,7 +1335,7 @@ function toggleAllActivities(checked: boolean) {
 
 async function deleteActivity(activity: Activity) {
   try {
-    await ElMessageBox.confirm(`确定删除活动“${activity.name}”吗？该活动下的分组、学生、评分与模板也会一起删除。`, "删除活动", {
+    await ElMessageBox.confirm(`确定删除活动“${activity.name}”吗？这会清空该活动的分组、学生、评委绑定、评分、模板、公告附件等全部相关数据。`, "删除活动", {
       type: "warning",
       confirmButtonText: "删除",
       cancelButtonText: "取消",
@@ -1338,7 +1377,7 @@ async function batchDeleteActivities() {
   }
 
   try {
-    await ElMessageBox.confirm(`确定删除已选择的 ${selectedActivityRows.value.length} 个活动吗？相关数据会一并删除。`, "批量删除活动", {
+    await ElMessageBox.confirm(`确定删除已选择的 ${selectedActivityRows.value.length} 个活动吗？这会清空这些活动的分组、学生、评委绑定、评分、模板、公告附件等全部相关数据。`, "批量删除活动", {
       type: "warning",
       confirmButtonText: "删除",
       cancelButtonText: "取消",
@@ -1959,14 +1998,16 @@ onUnmounted(() => {
                   <div class="admin-activity-row-title">
                     <strong>{{ activity.name }}</strong>
                     <div class="tag-row">
-                        <el-tag v-if="activity.isActive" type="primary">当前活动</el-tag>
+                      <el-tag v-if="activity.isActive" type="primary">当前活动</el-tag>
                       <el-tag :type="activity.isLocked ? 'danger' : 'success'">{{ activity.isLocked ? "已锁定" : "开放中" }}</el-tag>
+                      <el-tag :type="activity.isPublicVisible ? 'success' : 'info'">{{ activity.isPublicVisible ? "公共页可见" : "公共页隐藏" }}</el-tag>
                       <el-tag>{{ activity.type }}</el-tag>
                     </div>
                   </div>
                   <div class="admin-activity-row-actions">
                     <el-button size="small" plain :disabled="activity.isActive" @click="changeCurrentActivity(activity.id)">切换当前</el-button>
                     <el-button size="small" plain :icon="EditPen" :disabled="activity.isLocked" @click="openEditActivity(activity)">编辑</el-button>
+                    <el-button size="small" plain @click="openCloneActivity(activity)">复制</el-button>
                     <el-button size="small" plain @click="openAnnouncementEditor(activity)">公告</el-button>
                     <el-button size="small" @click="toggleActivityLock(activity)">{{ activity.isLocked ? "解锁" : "锁定" }}</el-button>
                     <el-button size="small" plain type="danger" :icon="Delete" :disabled="activity.isLocked" @click="deleteActivity(activity)">删除</el-button>
@@ -2580,7 +2621,7 @@ onUnmounted(() => {
       </section>
     </template>
 
-    <el-dialog v-model="activityDialog" class="mobile-dialog" :fullscreen="mobileDialog" :title="editingActivityId ? '编辑活动' : '新建活动'">
+    <el-dialog v-model="activityDialog" class="mobile-dialog" :fullscreen="mobileDialog" :title="activityDialogTitle">
       <el-form label-position="top">
         <el-form-item label="活动名称"><el-input v-model="activityForm.name" /></el-form-item>
         <el-form-item label="活动编码"><el-input v-model="activityForm.code" /></el-form-item>
@@ -2609,11 +2650,14 @@ onUnmounted(() => {
             />
           </el-form-item>
         </div>
+        <el-form-item label="公共页可见">
+          <el-switch v-model="activityForm.isPublicVisible" active-text="可见" inactive-text="隐藏" />
+        </el-form-item>
         <el-form-item label="说明"><el-input v-model="activityForm.description" type="textarea" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="activityDialog = false">取消</el-button>
-        <el-button type="primary" :loading="dialogSubmitting" @click="withDialogSubmit(createActivity)">{{ editingActivityId ? "更新" : "保存" }}</el-button>
+        <el-button type="primary" :loading="dialogSubmitting" @click="withDialogSubmit(createActivity)">{{ activityDialogSubmitText }}</el-button>
       </template>
     </el-dialog>
 

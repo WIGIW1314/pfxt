@@ -49,6 +49,7 @@ export type Activity = {
   calcMode: string;
   isActive: boolean;
   isLocked: boolean;
+  isPublicVisible: boolean;
   allowEditScore: boolean;
   showAvgToJudge: boolean;
   startTime?: string | null;

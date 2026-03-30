@@ -89,6 +89,10 @@ export async function ensureRuntimeSchema() {
     await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "avgDecimalPlaces" INTEGER NOT NULL DEFAULT 2;`);
   }
 
+  if (!columnNames.has("isPublicVisible")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "isPublicVisible" BOOLEAN NOT NULL DEFAULT 1;`);
+  }
+
   if (!columnNames.has("announcement")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "announcement" TEXT;`);
   }

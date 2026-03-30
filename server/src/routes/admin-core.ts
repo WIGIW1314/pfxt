@@ -42,6 +42,35 @@ function buildContentDisposition(chineseName: string, fallbackName: string) {
   return `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(chineseName)}`;
 }
 
+type AnnouncementFileMeta = {
+  name?: string;
+  url?: string;
+  type?: string;
+  description?: string;
+};
+
+function parseAnnouncementFiles(raw: unknown): AnnouncementFileMeta[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw !== "string") return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatActivityListItem(activity: any) {
+  return {
+    ...activity,
+    announcementFiles: parseAnnouncementFiles(activity.announcementFiles),
+    groupCount: activity._count.groups,
+    studentCount: activity._count.students,
+    judgeCount: activity.activityRoles.length,
+  };
+}
+
 async function normalizeActiveActivity() {
   const activities = await prisma.activity.findMany({
     orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
@@ -81,11 +110,15 @@ async function normalizeActiveActivity() {
       avgDecimalPlaces: true,
       isActive: true,
       isLocked: true,
+      isPublicVisible: true,
       allowEditScore: true,
       showAvgToJudge: true,
+      showPeerScoresToJudge: true,
+      showGroupProgressToSecretary: true,
       startTime: true,
       endTime: true,
       announcement: true,
+      announcementFiles: true,
       createdAt: true,
       templates: {
         select: {
@@ -113,12 +146,7 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
     await requireAdmin(request);
     const normalized = await normalizeActiveActivity();
     if (normalized.length) {
-      return normalized.map((activity) => ({
-        ...activity,
-        groupCount: activity._count.groups,
-        studentCount: activity._count.students,
-        judgeCount: activity.activityRoles.length,
-      }));
+      return normalized.map(formatActivityListItem);
     }
     const activities = await prisma.activity.findMany({
       orderBy: { createdAt: "desc" },
@@ -134,11 +162,15 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
         avgDecimalPlaces: true,
         isActive: true,
         isLocked: true,
+        isPublicVisible: true,
         allowEditScore: true,
         showAvgToJudge: true,
+        showPeerScoresToJudge: true,
+        showGroupProgressToSecretary: true,
         startTime: true,
         endTime: true,
         announcement: true,
+        announcementFiles: true,
         createdAt: true,
         templates: {
           select: {
@@ -159,23 +191,7 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
         },
       },
     });
-    // 补充 announcementFiles (兼容 Prisma client 未重新生成)
-    try {
-      const rows = await prisma.$queryRaw<Array<{ id: string; announcementFiles: string | null }>>`
-        SELECT "id", "announcementFiles" FROM "Activity"
-      `;
-      const map = new Map(rows.map(r => [r.id, r.announcementFiles]));
-      for (const a of activities as any[]) {
-        const raw = map.get(a.id);
-        a.announcementFiles = raw ? JSON.parse(raw) : [];
-      }
-    } catch { /* column may not exist yet */ }
-    return activities.map((activity) => ({
-      ...activity,
-      groupCount: activity._count.groups,
-      studentCount: activity._count.students,
-      judgeCount: activity.activityRoles.length,
-    }));
+    return activities.map(formatActivityListItem);
   });
 
   app.post("/api/admin/activities", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
@@ -187,6 +203,9 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
       type: string;
       scoreMode: string;
       calcMode: "SIMPLE_AVG" | "DROP_EXTREMES" | "WEIGHTED_AVG" | "ALL_SUBMITTED";
+      startTime?: string | null;
+      endTime?: string | null;
+      isPublicVisible?: boolean;
     };
 
     const activeCount = await prisma.activity.count({
@@ -196,6 +215,9 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
     const activity = await prisma.activity.create({
       data: {
         ...body,
+        startTime: toDateOrNull(body.startTime),
+        endTime: toDateOrNull(body.endTime),
+        isPublicVisible: body.isPublicVisible ?? true,
         createdBy: request.user.userId,
         isActive: activeCount === 0,
       },
@@ -284,33 +306,198 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
     return activity;
   });
 
+  app.post("/api/admin/activities/:id/clone", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
+    await requireAdmin(request);
+    const sourceActivityId = (request.params as { id: string }).id;
+    const body = request.body as {
+      name: string;
+      code: string;
+      description?: string;
+      type: string;
+      startTime?: string | null;
+      endTime?: string | null;
+      isPublicVisible?: boolean;
+    };
+
+    if (!body.name?.trim()) {
+      throw createHttpError("请填写活动名称", 400);
+    }
+    if (!body.code?.trim()) {
+      throw createHttpError("请填写活动编码", 400);
+    }
+
+    const sourceActivity = await prisma.activity.findUniqueOrThrow({
+      where: { id: sourceActivityId },
+      include: {
+        customRoles: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        },
+        templates: {
+          orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+          include: {
+            items: {
+              orderBy: { sortOrder: "asc" },
+            },
+          },
+        },
+      },
+    });
+
+    const clonedActivity = await prisma.$transaction(async (tx) => {
+      const activity = await tx.activity.create({
+        data: {
+          name: body.name.trim(),
+          code: body.code.trim(),
+          description: body.description?.trim() || null,
+          type: body.type?.trim() || sourceActivity.type,
+          scoreMode: sourceActivity.scoreMode,
+          calcMode: sourceActivity.calcMode,
+          activeTemplateId: null,
+          avgDecimalPlaces: sourceActivity.avgDecimalPlaces,
+          isActive: false,
+          isLocked: false,
+          isPublicVisible: body.isPublicVisible ?? false,
+          allowEditScore: sourceActivity.allowEditScore,
+          showAvgToJudge: sourceActivity.showAvgToJudge,
+          showPeerScoresToJudge: sourceActivity.showPeerScoresToJudge,
+          showGroupProgressToSecretary: sourceActivity.showGroupProgressToSecretary,
+          announcement: sourceActivity.announcement,
+          announcementFiles: sourceActivity.announcementFiles,
+          startTime: toDateOrNull(body.startTime),
+          endTime: toDateOrNull(body.endTime),
+          createdBy: request.user.userId,
+        },
+      });
+
+      for (const role of sourceActivity.customRoles) {
+        const newRole = await tx.activityCustomRole.create({
+          data: {
+            activityId: activity.id,
+            name: role.name,
+            description: role.description,
+            color: role.color,
+            sortOrder: role.sortOrder,
+          },
+        });
+      }
+
+      const templateIdMap = new Map<string, string>();
+      for (const template of sourceActivity.templates) {
+        const newTemplate = await tx.scoreTemplate.create({
+          data: {
+            activityId: activity.id,
+            name: template.name,
+            scoreMode: template.scoreMode,
+            totalScore: template.totalScore,
+            isDefault: template.isDefault,
+            items: {
+              create: template.items.map((item) => ({
+                name: item.name,
+                maxScore: item.maxScore,
+                weight: item.weight,
+                isRequired: item.isRequired,
+                sortOrder: item.sortOrder,
+                description: item.description,
+              })),
+            },
+          },
+        });
+        templateIdMap.set(template.id, newTemplate.id);
+      }
+
+      const nextActiveTemplateId =
+        (sourceActivity.activeTemplateId && templateIdMap.get(sourceActivity.activeTemplateId)) ||
+        templateIdMap.get(sourceActivity.templates.find((item) => item.isDefault)?.id || "") ||
+        Array.from(templateIdMap.values())[0] ||
+        null;
+
+      return tx.activity.update({
+        where: { id: activity.id },
+        data: {
+          activeTemplateId: nextActiveTemplateId,
+        },
+      });
+    });
+
+    await logOperation({
+      operatorId: request.user.userId,
+      operatorName: request.user.username,
+      module: "activity",
+      action: "clone",
+      targetType: "Activity",
+      targetId: clonedActivity.id,
+      afterData: {
+        id: clonedActivity.id,
+        sourceActivityId,
+        name: clonedActivity.name,
+        code: clonedActivity.code,
+      },
+    });
+
+    broadcast("activity.updated", { activityId: clonedActivity.id, sourceActivityId });
+    return clonedActivity;
+  });
+
   app.delete("/api/admin/activities/:id", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     await requireAdmin(request);
     const activityId = (request.params as { id: string }).id;
     const activity = await prisma.activity.findUniqueOrThrow({
       where: { id: activityId },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        isActive: true,
+        isLocked: true,
+        announcementFiles: true,
+      },
     });
 
     if (activity.isLocked) {
       throw createHttpError("当前活动已锁定，请解锁后再删除", 423);
     }
 
-    await prisma.activity.delete({
-      where: { id: activityId },
+    const announcementFiles = parseAnnouncementFiles(activity.announcementFiles);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.scoreDetail.deleteMany({
+        where: {
+          score: {
+            activityId,
+          },
+        },
+      });
+      await tx.score.deleteMany({ where: { activityId } });
+      await tx.scoreAssignment.deleteMany({ where: { activityId } });
+      await tx.student.deleteMany({ where: { activityId } });
+      await tx.activityUserRole.deleteMany({ where: { activityId } });
+      await tx.scoreItem.deleteMany({
+        where: {
+          template: {
+            activityId,
+          },
+        },
+      });
+      await tx.scoreTemplate.deleteMany({ where: { activityId } });
+      await tx.activityCustomRole.deleteMany({ where: { activityId } });
+      await tx.group.deleteMany({ where: { activityId } });
+      await tx.activity.delete({ where: { id: activityId } });
+
+      if (activity.isActive) {
+        const fallback = await tx.activity.findFirst({
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        if (fallback) {
+          await tx.activity.update({
+            where: { id: fallback.id },
+            data: { isActive: true },
+          });
+        }
+      }
     });
 
-    if (activity.isActive) {
-      const fallback = await prisma.activity.findFirst({
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
-      });
-      if (fallback) {
-        await prisma.activity.update({
-          where: { id: fallback.id },
-          data: { isActive: true },
-        });
-      }
-    }
+    await cleanupUnusedAnnouncementFiles(activityId, announcementFiles);
 
     await logOperation({
       operatorId: request.user.userId,
@@ -365,6 +552,63 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
   const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const uploadsDir = path.resolve(serverDir, "uploads");
   if (!fsSync.existsSync(uploadsDir)) fsSync.mkdirSync(uploadsDir, { recursive: true });
+
+  function getUploadFilenameFromUrl(url?: string | null) {
+    if (!url || !url.startsWith("/api/uploads/")) return null;
+    return path.basename(url);
+  }
+
+  function resolveUploadPath(filename: string) {
+    const filePath = path.resolve(uploadsDir, filename);
+    return filePath.startsWith(uploadsDir) ? filePath : null;
+  }
+
+  async function cleanupUnusedAnnouncementFiles(activityId: string, announcementFiles: AnnouncementFileMeta[]) {
+    const referencedUrls = new Set<string>();
+    const activities = await prisma.activity.findMany({
+      where: { id: { not: activityId } },
+      select: { announcementFiles: true },
+    });
+
+    for (const item of activities) {
+      parseAnnouncementFiles(item.announcementFiles).forEach((file) => {
+        if (file.url) {
+          referencedUrls.add(file.url);
+        }
+      });
+    }
+
+    const explicitFiles = new Set(
+      announcementFiles
+        .map((file) => getUploadFilenameFromUrl(file.url))
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    const prefixedFiles = new Set<string>();
+    try {
+      const entries = await fs.readdir(uploadsDir);
+      entries
+        .filter((name) => name.startsWith(`${activityId}_`))
+        .forEach((name) => prefixedFiles.add(name));
+    } catch {
+      return;
+    }
+
+    const targetFiles = new Set([...explicitFiles, ...prefixedFiles]);
+    await Promise.all(
+      Array.from(targetFiles).map(async (filename) => {
+        const url = `/api/uploads/${filename}`;
+        if (referencedUrls.has(url)) return;
+        const filePath = resolveUploadPath(filename);
+        if (!filePath) return;
+        try {
+          await fs.unlink(filePath);
+        } catch {
+          // ignore missing files
+        }
+      }),
+    );
+  }
 
   app.post("/api/admin/activities/:id/upload", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     await requireAdmin(request);
