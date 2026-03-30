@@ -32,7 +32,7 @@ const quickTotal = ref<number | undefined>(undefined);
 const maxTotal = computed(() => props.template?.items.reduce((s, i) => s + i.maxScore, 0) ?? 0);
 const generatingComment = ref(false);
 const generatingQuestions = ref(false);
-const questionTopic = ref("师范生面试问题");
+const questionTopic = ref("教师资格与教育教学素养");
 const scoreItemsOpen = ref(true);
 const aiQuestions = ref<string[]>([]);
 const closeGuardDisabled = ref(false);
@@ -81,7 +81,7 @@ watch(
   ({ student, template }) => {
     form.comment = student?.scores?.[0]?.comment || "";
     form.totalScore = student?.scores?.[0]?.totalScore || 0;
-    questionTopic.value = "师范生面试问题";
+    questionTopic.value = "教师资格与教育教学素养";
     aiQuestions.value = [];
     closeGuardDisabled.value = false;
     form.details = {};
@@ -286,7 +286,7 @@ async function generateQuestions() {
           <el-input v-model="questionTopic" placeholder="输入提问主题" />
           <el-button type="primary" plain :disabled="readonly" :loading="generatingQuestions" @click="generateQuestions">AI生成提问</el-button>
         </div>
-        <div class="muted" style="margin-top: 6px">默认主题：师范生面试问题，可自行修改。</div>
+        <div class="muted" style="margin-top: 6px">默认主题：教师资格与教育教学素养，可自行修改。</div>
         <div v-if="aiQuestions.length" class="score-question-list">
           <div v-for="(question, index) in aiQuestions" :key="`${index}-${question}`" class="score-question-item">
             <span class="score-question-index">问题{{ index + 1 }}</span>

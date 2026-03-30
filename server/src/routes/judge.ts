@@ -35,7 +35,7 @@ const AI_MODEL = process.env.AI_MODEL?.trim() || "@cf/openai/gpt-oss-20b";
 const AI_REASONING_EFFORT = process.env.AI_REASONING_EFFORT?.trim() || "";
 const AI_REASONING_SUMMARY = process.env.AI_REASONING_SUMMARY?.trim() || "";
 const COMMENT_SYSTEM_PROMPT = "你是教学评分系统里的评语生成器。只输出可直接写入评分表的中文评语正文。禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；禁止出现“你的”“您的”“学生的”“该生的”“选手的”等第二人称或领属说法；禁止输出称呼、解释、分析过程、客套话、标题、引号、项目符号；必须是完整短句。";
-const QUESTION_SYSTEM_PROMPT = "你是师范生模拟讲课评分现场的评委提问生成器。提问对象是大学生师范生，不是成熟教师。问题必须紧扣试讲主题和课堂片段，难度适中，适合讲课结束后的现场追问。只输出可直接提问的中文问题文本，禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
+const QUESTION_SYSTEM_PROMPT = "你是师范生教师资格面试与试讲考核现场的评委提问生成器。提问对象是正在参加考核的大学生师范生。你必须生成评委直接向考生发问的中文问题，不能生成关于如何准备面试、如何设计面试题、如何给面试官留下印象之类的元问题。问题要贴近教师资格与教育教学场景，难度适中，可用于现场追问。只输出可直接提问的中文问题文本，禁止输出任何英文单词、英文缩写、英文字母或中英混排内容；不要解释，不要答案，不要寒暄；不要出现“您”“你的”“您的”“同学”等称呼，直接输出自然的问题句。";
 
 function buildAiResponsesUrl() {
   return `https://api.cloudflare.com/client/v4/accounts/${AI_ACCOUNT_ID}/ai/v1/responses`;
@@ -530,16 +530,18 @@ async function generateCommentByAi(params: {
 }
 
 async function generateQuestionsByAi(topic: string) {
-  const prompt = `场景：一名大学生师范生刚完成“${topic}”的模拟讲课，评委需要在试讲结束后做1到2个有针对性的现场追问。
+  const prompt = `场景：一名大学生师范生正在参加教师资格相关面试与试讲考核，评委需要围绕“${topic}”做1到2个有针对性的现场提问。
 要求：
-1. 问题必须紧扣“${topic}”本身，不要跑题。
-2. 问题难度不要太高，要符合大学生师范生试讲后的问答场景。
-3. 优先追问教学设计、重点难点处理、师生互动、课堂组织、教学方法，而不是学科研究或过深理论。
-4. 语气自然、口语化、像评委现场发问。
-5. 每题不超过30字。
-6. 不要答案，不要解释，不要开场白，不要编号。
-7. 禁止出现任何英文单词、英文缩写、英文字母或中英混排内容。
-只输出题目本身。`;
+1. 问题必须紧扣“${topic}”本身，不要跑题，但要理解成“评委向考生发问的主题方向”。
+2. 如果主题较泛，例如“师范生面试问题”“教师资格问题”，要将其理解为教师资格与教育教学素养相关提问，不要生成“如何准备面试”“如何设计面试题”“如何让面试官印象深刻”这类元问题。
+3. 问题难度不要太高，要符合大学生师范生参加教师资格相关面试和试讲考核时的现场问答场景。
+4. 优先围绕教育理念、教师职业认知、课堂组织、教学设计、突发情况处理、师生沟通、职业道德等方向提问，而不是学科研究或过深理论。
+5. 问题必须是评委直接问考生的话，不能写成经验分享题、方法论题、命题设计题。
+6. 语气自然、口语化、像评委现场发问。
+7. 每题不超过30字。
+8. 不要答案，不要解释，不要开场白，不要编号。
+9. 禁止出现任何英文单词、英文缩写、英文字母或中英混排内容。
+10. 只输出题目本身。`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
 
@@ -1868,7 +1870,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
   app.post("/api/judge/activities/:activityId/students/:studentId/generate-questions", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
     const body = request.body as { topic?: string };
-    const topic = String(body.topic || "师范生面试问题").trim() || "师范生面试问题";
+      const topic = String(body.topic || "教师资格与教育教学素养").trim() || "教师资格与教育教学素养";
 
     await ensureJudgeAccess(activityId, studentId, request.user.userId);
     const questions = await generateQuestionsByAi(topic);
