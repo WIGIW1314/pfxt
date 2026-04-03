@@ -141,11 +141,34 @@ export async function ensureRuntimeSchema() {
     );
   }
 
-  // ActivityUserRole.customRoleId
+  // Activity: new feature flag columns
+  if (!columnNames.has("showExportZip")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "showExportZip" BOOLEAN NOT NULL DEFAULT 1;`);
+  }
+  if (!columnNames.has("showExportXlsx")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "showExportXlsx" BOOLEAN NOT NULL DEFAULT 1;`);
+  }
+  if (!columnNames.has("showCommentUi")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "showCommentUi" BOOLEAN NOT NULL DEFAULT 1;`);
+  }
+  if (!columnNames.has("showQuestionUi")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "showQuestionUi" BOOLEAN NOT NULL DEFAULT 1;`);
+  }
+  if (!columnNames.has("judgeAnnouncement")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "judgeAnnouncement" TEXT;`);
+  }
+  if (!columnNames.has("judgeAnnouncementFiles")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "judgeAnnouncementFiles" TEXT;`);
+  }
+
+  // ActivityUserRole.customRoleId + sortOrder
   const aurColumns = (await prisma.$queryRawUnsafe<Array<{ name: string }>>(`PRAGMA table_info("ActivityUserRole");`)) || [];
   const aurColNames = new Set(aurColumns.map((c) => c.name));
   if (!aurColNames.has("customRoleId")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "ActivityUserRole" ADD COLUMN "customRoleId" TEXT;`);
+  }
+  if (!aurColNames.has("sortOrder")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "ActivityUserRole" ADD COLUMN "sortOrder" INTEGER NOT NULL DEFAULT 0;`);
   }
 
   // Student.customRoleId

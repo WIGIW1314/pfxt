@@ -35,7 +35,7 @@ async function submit() {
     <section class="glass-panel login-card">
       <div class="login-header">
         <img :src="logoUrl" alt="logo" class="login-logo" />
-        <h1 class="login-title">评分系统入口</h1>
+        <h1 class="login-title">{{ sync.siteTitle }}</h1>
       </div>
 
       <el-form label-position="top" @submit.prevent="submit">

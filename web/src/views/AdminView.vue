@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Search, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
+import { Checked, Collection, Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Search, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
 import AppShell from "../components/AppShell.vue";
 import { api, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
@@ -36,6 +36,18 @@ const dashboardActivityId = ref(localStorage.getItem(ADMIN_DASHBOARD_ACTIVITY_KE
 const activityId = computed(() => selectedActivityId.value || activities.value.find((item) => item.isActive)?.id || activities.value[0]?.id || auth.currentActivityRole?.activityId || "");
 const currentActivity = computed(() => activities.value.find((item) => item.isActive) || activities.value.find((item) => item.id === activityId.value) || activities.value[0] || null);
 const dashboardActivity = computed(() => activities.value.find((item) => item.id === dashboardActivityId.value) || currentActivity.value || null);
+const completionPercent = computed(() => {
+  const s = dashboard.value?.studentCount || 0;
+  const c = dashboard.value?.completedStudentCount || 0;
+  return s > 0 ? Math.round((c / s) * 100) : 0;
+});
+const sortedGroupStats = computed(() => dashboard.value?.groupStats || []);
+function ringStrokeColor(progress: number): string {
+  if (progress >= 1) return '#16a34a';
+  if (progress > 0.6) return '#2f80ed';
+  if (progress > 0) return '#f59e0b';
+  return '#d1d5db';
+}
 const currentActivityLocked = computed(() => Boolean(currentActivity.value?.isLocked));
 const onlineRoleLabelMap: Record<string, string> = {
   SUPER_ADMIN: "系统管理员",
@@ -401,6 +413,10 @@ const activityForm = reactive({
   startTime: "",
   endTime: "",
   isPublicVisible: true,
+  showExportZip: true,
+  showExportXlsx: true,
+  showCommentUi: true,
+  showQuestionUi: true,
 });
 
 
@@ -463,10 +479,14 @@ async function submitPasswordChange() {
 
 const announcementDialog = ref(false);
 const announcementEditId = ref("");
+const announcementTab = ref<'student' | 'judge'>('student');
 const announcementContent = ref("");
 const announcementFiles = ref<Array<{ name: string; url: string; type: string; description?: string }>>([]);
+const judgeAnnouncementContent = ref("");
+const judgeAnnouncementFiles = ref<Array<{ name: string; url: string; type: string; description?: string }>>([]);
 const announcementSaving = ref(false);
 const announcementUploading = ref(false);
+const judgeAnnouncementUploading = ref(false);
 
 bindSimpleModalHistory(passwordDialog, "admin-password-dialog");
 bindSimpleModalHistory(activityDialog, "admin-activity-dialog");
@@ -483,11 +503,17 @@ bindSimpleModalHistory(groupImportOpen, "admin-group-import-dialog");
 
 function openAnnouncementEditor(activity: Activity) {
   announcementEditId.value = activity.id;
-  announcementContent.value = (activity as any).announcement || "";
+  announcementTab.value = 'student';
+  announcementContent.value = activity.announcement || "";
   try {
-    const raw = (activity as any).announcementFiles;
+    const raw = activity.announcementFiles;
     announcementFiles.value = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : [];
   } catch { announcementFiles.value = []; }
+  judgeAnnouncementContent.value = (activity as any).judgeAnnouncement || "";
+  try {
+    const rawJ = (activity as any).judgeAnnouncementFiles;
+    judgeAnnouncementFiles.value = rawJ ? (typeof rawJ === "string" ? JSON.parse(rawJ) : rawJ) : [];
+  } catch { judgeAnnouncementFiles.value = []; }
   announcementDialog.value = true;
 }
 
@@ -510,6 +536,25 @@ async function handleAnnouncementFileUpload(uploadFile: any) {
   }
 }
 
+async function handleJudgeAnnouncementFileUpload(uploadFile: any) {
+  judgeAnnouncementUploading.value = true;
+  try {
+    const fd = new FormData();
+    fd.append("file", uploadFile.raw || uploadFile);
+    const { data } = await api.post(
+      `/api/admin/activities/${announcementEditId.value}/upload`,
+      fd,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    judgeAnnouncementFiles.value.push(data);
+    ElMessage.success(`${data.name} 上传成功`);
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.message || "上传失败");
+  } finally {
+    judgeAnnouncementUploading.value = false;
+  }
+}
+
 function removeAnnouncementFile(index: number) {
   announcementFiles.value.splice(index, 1);
 }
@@ -520,6 +565,8 @@ async function saveAnnouncement() {
     await api.put(`/api/admin/activities/${announcementEditId.value}`, {
       announcement: announcementContent.value,
       announcementFiles: JSON.stringify(announcementFiles.value),
+      judgeAnnouncement: judgeAnnouncementContent.value,
+      judgeAnnouncementFiles: JSON.stringify(judgeAnnouncementFiles.value),
     });
     ElMessage.success("公告已保存");
     announcementDialog.value = false;
@@ -560,6 +607,7 @@ const judgeForm = reactive({
   role: "JUDGE",
   groupId: "",
   customRoleId: "",
+  sortOrder: 0,
 });
 
 const logForm = reactive({
@@ -575,6 +623,10 @@ const logForm = reactive({
 const activitySettingsForm = reactive({
   activeTemplateId: "",
   avgDecimalPlaces: 2,
+  showExportZip: true,
+  showExportXlsx: true,
+  showCommentUi: true,
+  showQuestionUi: true,
 });
 
 function createDefaultTemplateItems() {
@@ -641,6 +693,10 @@ function fillTemplateForm(template: ScoreTemplate) {
 function syncActivitySettings() {
   activitySettingsForm.activeTemplateId = activeTemplate.value?.id || "";
   activitySettingsForm.avgDecimalPlaces = currentActivity.value?.avgDecimalPlaces ?? 2;
+  activitySettingsForm.showExportZip = currentActivity.value?.showExportZip ?? true;
+  activitySettingsForm.showExportXlsx = currentActivity.value?.showExportXlsx ?? true;
+  activitySettingsForm.showCommentUi = currentActivity.value?.showCommentUi ?? true;
+  activitySettingsForm.showQuestionUi = currentActivity.value?.showQuestionUi ?? true;
 }
 
 function resetActivityForm() {
@@ -657,6 +713,10 @@ function resetActivityForm() {
     startTime: "",
     endTime: "",
     isPublicVisible: true,
+    showExportZip: true,
+    showExportXlsx: true,
+    showCommentUi: true,
+    showQuestionUi: true,
   });
 }
 
@@ -697,6 +757,7 @@ function resetJudgeForm() {
     role: "JUDGE",
     groupId: groups.value[0]?.id || "",
     customRoleId: "",
+    sortOrder: 0,
   });
 }
 
@@ -754,6 +815,10 @@ function openEditActivity(activity: Activity) {
     startTime: activity.startTime ? formatBJ(activity.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
     endTime: activity.endTime ? formatBJ(activity.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
     isPublicVisible: activity.isPublicVisible,
+    showExportZip: activity.showExportZip ?? true,
+    showExportXlsx: activity.showExportXlsx ?? true,
+    showCommentUi: activity.showCommentUi ?? true,
+    showQuestionUi: activity.showQuestionUi ?? true,
   });
   activityDialog.value = true;
 }
@@ -835,6 +900,7 @@ function openEditJudge(judge: any) {
     role: judge.role,
     groupId: judge.groupId || "",
     customRoleId: judge.customRoleId || "",
+    sortOrder: judge.sortOrder ?? 0,
   });
   judgeDialog.value = true;
 }
@@ -1127,6 +1193,7 @@ async function saveJudge() {
       role: judgeForm.role,
       groupId: judgeForm.groupId || null,
       customRoleId: judgeForm.customRoleId || null,
+      sortOrder: judgeForm.sortOrder,
     });
     ElMessage.success("评委已更新");
   } else {
@@ -1138,6 +1205,7 @@ async function saveJudge() {
       role: judgeForm.role,
       groupId: judgeForm.groupId || null,
       customRoleId: judgeForm.customRoleId || null,
+      sortOrder: judgeForm.sortOrder,
     });
     ElMessage.success("评委已创建");
   }
@@ -1233,6 +1301,10 @@ async function saveActivitySettings() {
   await api.put(`/api/admin/activities/${activityId.value}`, {
     activeTemplateId: activitySettingsForm.activeTemplateId || null,
     avgDecimalPlaces: activitySettingsForm.avgDecimalPlaces,
+    showExportZip: activitySettingsForm.showExportZip,
+    showExportXlsx: activitySettingsForm.showExportXlsx,
+    showCommentUi: activitySettingsForm.showCommentUi,
+    showQuestionUi: activitySettingsForm.showQuestionUi,
   });
   ElMessage.success("活动评分配置已更新");
   await fetchAll();
@@ -1836,6 +1908,24 @@ onUnmounted(() => {
               </div>
             </div>
             <div class="admin-hero-desc">{{ dashboardActivity?.description || "选择一个活动后查看首页概览数据" }}</div>
+            <div v-if="dashboard" class="admin-hero-completion">
+              <div class="admin-completion-ring">
+                <svg viewBox="0 0 56 56" width="56" height="56">
+                  <circle cx="28" cy="28" r="22" fill="none" stroke="rgba(64,158,255,0.14)" stroke-width="6"/>
+                  <circle cx="28" cy="28" r="22" fill="none" stroke="#2f80ed" stroke-width="6"
+                    stroke-linecap="round"
+                    stroke-dasharray="138.23"
+                    :stroke-dashoffset="138.23 * (1 - completionPercent / 100)"
+                    transform="rotate(-90 28 28)"
+                  />
+                </svg>
+                <div class="admin-completion-ring-text">{{ completionPercent }}%</div>
+              </div>
+              <div>
+                <div class="admin-completion-label">总完成率</div>
+                <div class="admin-completion-sub">{{ dashboard.completedStudentCount }}/{{ dashboard.studentCount }} 名学生已完成评分</div>
+              </div>
+            </div>
             <el-select
               v-if="activities.length"
               :model-value="dashboardActivityId"
@@ -1854,22 +1944,36 @@ onUnmounted(() => {
         </section>
 
         <div class="admin-top-side">
-          <section class="stats-row admin-dashboard-stats">
-            <div class="glass-panel stat-card">
-              <div class="muted">活动数</div>
+          <section class="stats-row admin-dashboard-stats admin-dashboard-stats--6">
+            <div class="glass-panel stat-card stat-card--accent-blue">
+              <el-icon class="stat-icon"><Histogram /></el-icon>
               <div class="stat-value">{{ activities.length }}</div>
+              <div class="muted">活动数</div>
             </div>
-            <div class="glass-panel stat-card">
-              <div class="muted">学生数</div>
+            <div class="glass-panel stat-card stat-card--accent-teal">
+              <el-icon class="stat-icon"><Collection /></el-icon>
+              <div class="stat-value">{{ dashboard?.groupCount || 0 }}</div>
+              <div class="muted">分组数</div>
+            </div>
+            <div class="glass-panel stat-card stat-card--accent-purple">
+              <el-icon class="stat-icon"><UserFilled /></el-icon>
               <div class="stat-value">{{ dashboard?.studentCount || 0 }}</div>
+              <div class="muted">学生数</div>
             </div>
-            <div class="glass-panel stat-card">
-              <div class="muted">评委数</div>
+            <div class="glass-panel stat-card stat-card--accent-orange">
+              <el-icon class="stat-icon"><Setting /></el-icon>
               <div class="stat-value">{{ dashboard?.judgeCount || 0 }}</div>
+              <div class="muted">评委数</div>
             </div>
-            <div class="glass-panel stat-card">
-              <div class="muted">已完成</div>
+            <div class="glass-panel stat-card stat-card--accent-green">
+              <el-icon class="stat-icon"><Checked /></el-icon>
               <div class="stat-value">{{ dashboard?.completedStudentCount || 0 }}</div>
+              <div class="muted">已完成</div>
+            </div>
+            <div class="glass-panel stat-card stat-card--accent-indigo">
+              <el-icon class="stat-icon"><EditPen /></el-icon>
+              <div class="stat-value">{{ dashboard?.scoreCount || 0 }}</div>
+              <div class="muted">已提交评分</div>
             </div>
           </section>
 
@@ -1940,18 +2044,47 @@ onUnmounted(() => {
 
       <section class="glass-panel admin-dashboard-block" style="padding: 12px">
         <div class="panel-header">
-          <h3 style="margin: 0">分组完成率</h3>
+          <h3 style="margin: 0">分组完成进度</h3>
           <el-tag round type="success">WebSocket 实时刷新</el-tag>
         </div>
-        <div class="card-list">
-          <div v-for="item in dashboard?.groupStats || []" :key="item.groupId" class="entity-card glass-panel">
-            <div class="panel-header">
-              <strong>{{ item.groupName }}</strong>
-              <span class="muted">{{ item.completedCount }}/{{ item.studentCount }} 完成</span>
+        <div v-if="sortedGroupStats.length" class="admin-group-rings-grid">
+          <div
+            v-for="item in sortedGroupStats"
+            :key="item.groupId"
+            class="glass-panel admin-group-ring-card"
+            :style="`--ring-color: ${ringStrokeColor(item.progress)}`"
+          >
+            <div class="admin-group-ring-wrap">
+              <svg class="admin-group-ring-svg" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="30" cy="30" r="23" fill="none" stroke="rgba(0,0,0,0.07)" stroke-width="6"/>
+                <circle
+                  cx="30" cy="30" r="23" fill="none"
+                  :stroke="ringStrokeColor(item.progress)"
+                  stroke-width="6"
+                  stroke-linecap="round"
+                  stroke-dasharray="144.51"
+                  :stroke-dashoffset="144.51 * (1 - item.progress)"
+                  transform="rotate(-90 30 30)"
+                  class="admin-group-ring-arc"
+                />
+              </svg>
+              <div class="admin-group-ring-label">
+                <span class="admin-group-ring-pct">{{ Math.round(item.progress * 100) }}<span class="admin-group-ring-unit">%</span></span>
+              </div>
             </div>
-            <el-progress :percentage="Math.round(item.progress * 100)" :stroke-width="10" :show-text="true" />
+            <div class="admin-group-ring-info">
+              <div class="admin-group-ring-name" :title="item.groupName">{{ item.groupName }}</div>
+              <div class="admin-group-ring-fraction">
+                <span class="admin-group-ring-done">{{ item.completedCount }}</span>
+                <span class="admin-group-ring-total">/{{ item.studentCount }} 完成</span>
+              </div>
+              <div class="admin-group-ring-bar">
+                <div class="admin-group-ring-bar-fill" :style="{ width: Math.round(item.progress * 100) + '%' }"></div>
+              </div>
+            </div>
           </div>
         </div>
+        <el-empty v-else description="暂无分组数据" :image-size="56" />
       </section>
       </div>
       </div>
@@ -2294,6 +2427,20 @@ onUnmounted(() => {
             </el-form-item>
             <el-form-item label="平均分小数位数">
               <el-input-number v-model="activitySettingsForm.avgDecimalPlaces" :min="0" :max="4" :disabled="currentActivityLocked" style="width: 100%" />
+            </el-form-item>
+          </div>
+          <div class="compact-grid cols-2" style="margin-top: 12px">
+            <el-form-item label="导出选项">
+              <div style="display: flex; flex-direction: column; gap: 8px">
+                <el-switch v-model="activitySettingsForm.showExportZip" :disabled="currentActivityLocked" active-text="显示导出评价表（ZIP）" />
+                <el-switch v-model="activitySettingsForm.showExportXlsx" :disabled="currentActivityLocked" active-text="显示导出 XLSX" />
+              </div>
+            </el-form-item>
+            <el-form-item label="评委评分 UI">
+              <div style="display: flex; flex-direction: column; gap: 8px">
+                <el-switch v-model="activitySettingsForm.showCommentUi" :disabled="currentActivityLocked" active-text="显示评语相关 UI" />
+                <el-switch v-model="activitySettingsForm.showQuestionUi" :disabled="currentActivityLocked" active-text="显示提问相关 UI" />
+              </div>
             </el-form-item>
           </div>
         </el-form>
@@ -2652,6 +2799,18 @@ onUnmounted(() => {
         <el-form-item label="公共页可见">
           <el-switch v-model="activityForm.isPublicVisible" active-text="可见" inactive-text="隐藏" />
         </el-form-item>
+        <el-form-item label="导出功能">
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <el-switch v-model="activityForm.showExportZip" active-text="显示导出评价表（ZIP）" />
+            <el-switch v-model="activityForm.showExportXlsx" active-text="显示导出 XLSX" />
+          </div>
+        </el-form-item>
+        <el-form-item label="评委评分 UI">
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <el-switch v-model="activityForm.showCommentUi" active-text="显示评语相关 UI" />
+            <el-switch v-model="activityForm.showQuestionUi" active-text="显示提问相关 UI" />
+          </div>
+        </el-form-item>
         <el-form-item label="说明"><el-input v-model="activityForm.description" type="textarea" /></el-form-item>
       </el-form>
       <template #footer>
@@ -2660,39 +2819,78 @@ onUnmounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="announcementDialog" class="mobile-dialog" :fullscreen="mobileDialog" title="编辑活动公告" width="800px">
-      <el-form label-position="top">
-        <el-form-item label="公告内容（富文本编辑器）">
-          <RichEditor v-model="announcementContent" />
-        </el-form-item>
-        <el-form-item label="附件文档（PDF / DOCX）">
-          <div class="announcement-files">
-            <div v-for="(f, idx) in announcementFiles" :key="f.url" class="announcement-file-item">
-              <span class="announcement-file-icon">{{ f.type === 'pdf' ? '📄' : '📝' }}</span>
-              <div class="announcement-file-info">
-                <span class="announcement-file-name">{{ f.name }}</span>
-                <el-input
-                  v-model="f.description"
-                  size="small"
-                  placeholder="文件说明（选填）"
-                  class="announcement-file-desc-input"
-                />
+    <el-dialog v-model="announcementDialog" class="mobile-dialog" :fullscreen="mobileDialog" title="编辑活动公告" width="860px">
+      <el-tabs v-model="announcementTab" class="announcement-tabs">
+        <el-tab-pane label="学生公告" name="student">
+          <el-form label-position="top">
+            <el-form-item label="公告内容（HTML 富文本）">
+              <RichEditor v-model="announcementContent" />
+            </el-form-item>
+            <el-form-item label="附件文档（PDF / DOCX）">
+              <div class="announcement-files">
+                <div v-for="(f, idx) in announcementFiles" :key="f.url" class="announcement-file-item">
+                  <span class="announcement-file-icon">{{ f.type === 'pdf' ? '📄' : '📝' }}</span>
+                  <div class="announcement-file-info">
+                    <span class="announcement-file-name">{{ f.name }}</span>
+                    <el-input
+                      v-model="f.description"
+                      size="small"
+                      placeholder="文件说明（选填）"
+                      class="announcement-file-desc-input"
+                    />
+                  </div>
+                  <el-button size="small" type="danger" text @click="announcementFiles.splice(idx, 1)">删除</el-button>
+                </div>
+                <el-upload
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  accept=".pdf,.docx"
+                  @change="handleAnnouncementFileUpload"
+                >
+                  <el-button size="small" type="primary" plain :loading="announcementUploading">
+                    <el-icon><Upload /></el-icon> 上传文档
+                  </el-button>
+                </el-upload>
               </div>
-              <el-button size="small" type="danger" text @click="removeAnnouncementFile(idx)">删除</el-button>
-            </div>
-            <el-upload
-              :auto-upload="false"
-              :show-file-list="false"
-              accept=".pdf,.docx"
-              @change="handleAnnouncementFileUpload"
-            >
-              <el-button size="small" type="primary" plain :loading="announcementUploading">
-                <el-icon><Upload /></el-icon> 上传文档
-              </el-button>
-            </el-upload>
-          </div>
-        </el-form-item>
-      </el-form>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+
+        <el-tab-pane label="评委公告" name="judge">
+          <el-form label-position="top">
+            <el-form-item label="公告内容（HTML 富文本）">
+              <RichEditor v-model="judgeAnnouncementContent" />
+            </el-form-item>
+            <el-form-item label="附件文档（PDF / DOCX）">
+              <div class="announcement-files">
+                <div v-for="(f, idx) in judgeAnnouncementFiles" :key="f.url" class="announcement-file-item">
+                  <span class="announcement-file-icon">{{ f.type === 'pdf' ? '📄' : '📝' }}</span>
+                  <div class="announcement-file-info">
+                    <span class="announcement-file-name">{{ f.name }}</span>
+                    <el-input
+                      v-model="f.description"
+                      size="small"
+                      placeholder="文件说明（选填）"
+                      class="announcement-file-desc-input"
+                    />
+                  </div>
+                  <el-button size="small" type="danger" text @click="judgeAnnouncementFiles.splice(idx, 1)">删除</el-button>
+                </div>
+                <el-upload
+                  :auto-upload="false"
+                  :show-file-list="false"
+                  accept=".pdf,.docx"
+                  @change="handleJudgeAnnouncementFileUpload"
+                >
+                  <el-button size="small" type="primary" plain :loading="judgeAnnouncementUploading">
+                    <el-icon><Upload /></el-icon> 上传文档
+                  </el-button>
+                </el-upload>
+              </div>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
       <template #footer>
         <el-button @click="announcementDialog = false">取消</el-button>
         <el-button type="primary" :loading="announcementSaving" @click="saveAnnouncement">保存公告</el-button>
@@ -2837,6 +3035,9 @@ onUnmounted(() => {
           <el-select v-model="judgeForm.customRoleId" clearable placeholder="选择活动角色（可选）">
             <el-option v-for="role in customRoles" :key="role.id" :label="role.name" :value="role.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="组内顺序">
+          <el-input-number v-model="judgeForm.sortOrder" :min="0" :step="1" style="width: 100%" />
         </el-form-item>
       </el-form>
       <template #footer>

@@ -48,6 +48,7 @@ const judgeItems = [
   { label: "主页", path: "/judge/home", icon: DataBoard },
   { label: "现场评分", path: "/judge/students", icon: User },
   { label: "表格评分", path: "/judge/score", icon: Operation },
+  { label: "公告", path: "/judge/announcement", icon: ChatLineSquare },
   { label: "我的", path: "/judge/profile", icon: Management },
 ];
 
@@ -94,10 +95,10 @@ onUnmounted(() => {
       </div>
       <div class="topbar-info">
         <template v-if="mode === 'public'">
-          <div class="topbar-system-name">{{ title || '线上评分系统' }}</div>
+          <div class="topbar-system-name">{{ sync.siteTitle }}</div>
         </template>
         <template v-else-if="mode === 'admin'">
-          <div class="topbar-system-name">线上评分系统</div>
+          <div class="topbar-system-name">{{ sync.siteTitle }}</div>
         </template>
         <template v-else>
           <div class="topbar-welcome">{{ welcomeText }}</div>

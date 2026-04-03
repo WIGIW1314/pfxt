@@ -7,6 +7,7 @@ export const useSyncStore = defineStore("sync", () => {
   const version = ref(0);
   const events = ref<string[]>([]);
   const latestEvent = ref<{ type: string; payload: any } | null>(null);
+  const siteTitle = ref("线上评分系统");
   const onlineSnapshot = ref<{
     total: number;
     judges: number;
@@ -31,6 +32,18 @@ export const useSyncStore = defineStore("sync", () => {
   let socket: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
   let shouldReconnect = true;
+
+  async function fetchSiteTitle() {
+    try {
+      const res = await fetch(`${API_BASE}/api/meta/active-title`);
+      if (res.ok) {
+        const data = await res.json();
+        siteTitle.value = data.title || "线上评分系统";
+      }
+    } catch {
+      // keep default title on network error
+    }
+  }
 
   async function pingPresence() {
     const auth = useAuthStore();
@@ -126,5 +139,5 @@ export const useSyncStore = defineStore("sync", () => {
     socket = null;
   }
 
-  return { version, events, latestEvent, onlineSnapshot, connect, disconnect, reconnect };
+  return { version, events, latestEvent, siteTitle, onlineSnapshot, connect, disconnect, reconnect, fetchSiteTitle };
 });

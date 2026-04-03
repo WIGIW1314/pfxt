@@ -42,6 +42,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
         role: true,
         groupId: true,
         customRoleId: true,
+        sortOrder: true,
         createdAt: true,
         user: {
           select: {
@@ -66,7 +67,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
           },
         },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
   });
 
@@ -82,6 +83,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
       role: UserRole;
       groupId?: string;
       customRoleId?: string;
+      sortOrder?: number;
     };
     await ensureActivityUnlocked(body.activityId);
 
@@ -129,6 +131,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
         groupId: body.groupId,
         customRoleId: body.customRoleId || null,
         isPrimary: true,
+        sortOrder: body.sortOrder ?? 0,
       },
       include: {
         user: true,
@@ -141,16 +144,24 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
       const students = await prisma.student.findMany({
         where: { activityId: body.activityId, groupId: body.groupId },
       });
-      await prisma.scoreAssignment.createMany({
-        data: students.map((student) => ({
-          activityId: body.activityId,
-          studentId: student.id,
-          judgeUserId: userId!,
-          groupId: body.groupId!,
-        })),
-        // @ts-expect-error skipDuplicates works at runtime with SQLite
-        skipDuplicates: true,
-      });
+      if (students.length) {
+        const existing = await prisma.scoreAssignment.findMany({
+          where: { activityId: body.activityId, judgeUserId: userId! },
+          select: { studentId: true },
+        });
+        const existingSet = new Set(existing.map((a) => a.studentId));
+        const newData = students
+          .filter((s) => !existingSet.has(s.id))
+          .map((student) => ({
+            activityId: body.activityId,
+            studentId: student.id,
+            judgeUserId: userId!,
+            groupId: body.groupId!,
+          }));
+        if (newData.length) {
+          await prisma.scoreAssignment.createMany({ data: newData });
+        }
+      }
     }
 
     broadcast("judge.updated", { activityId: body.activityId });
@@ -166,6 +177,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
       role: UserRole;
       groupId?: string | null;
       customRoleId?: string | null;
+      sortOrder?: number;
     };
 
     const currentRelation = await prisma.activityUserRole.findUniqueOrThrow({
@@ -190,6 +202,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
         role: body.role,
         groupId: body.groupId || null,
         customRoleId: body.customRoleId !== undefined ? (body.customRoleId || null) : undefined,
+        sortOrder: body.sortOrder !== undefined ? body.sortOrder : undefined,
       },
       include: {
         user: true,
@@ -220,16 +233,22 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
         },
       });
       if (students.length) {
-        await prisma.scoreAssignment.createMany({
-          data: students.map((student) => ({
+        const existing = await prisma.scoreAssignment.findMany({
+          where: { activityId: updatedRelation.activityId, judgeUserId: updatedRelation.userId },
+          select: { studentId: true },
+        });
+        const existingSet = new Set(existing.map((a) => a.studentId));
+        const newData = students
+          .filter((s) => !existingSet.has(s.id))
+          .map((student) => ({
             activityId: updatedRelation.activityId,
             studentId: student.id,
             judgeUserId: updatedRelation.userId,
             groupId: updatedRelation.groupId!,
-          })),
-          // @ts-expect-error skipDuplicates works at runtime with SQLite
-          skipDuplicates: true,
-        });
+          }));
+        if (newData.length) {
+          await prisma.scoreAssignment.createMany({ data: newData });
+        }
       }
     }
 
@@ -280,8 +299,9 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
     const customRoleMap = new Map(customRoles.map((r) => [r.name, r]));
 
     for (const row of rows) {
-      const username = String(row[1] ?? "");
-      const realName = String(row[0] ?? "");
+      const username = String(row[1] ?? "").trim();
+      const realName = String(row[0] ?? "").trim();
+      if (!username) continue;
       const passwordHash = await bcrypt.hash(String(row[2] ?? "123456"), 10);
       let user = await prisma.user.findUnique({ where: { username } });
       if (!user) {
@@ -299,6 +319,8 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
       const group = groupMap.get(String(row[3] ?? ""));
       const customRoleName = String(row[4] ?? "").trim();
       const customRole = customRoleName ? customRoleMap.get(customRoleName) : undefined;
+      const sortOrderRaw = row[5];
+      const sortOrder = sortOrderRaw !== undefined && sortOrderRaw !== "" ? Number(sortOrderRaw) : 0;
 
       const existingRole = await prisma.activityUserRole.findFirst({
         where: { activityId, userId: user.id },
@@ -307,6 +329,9 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
         const updateData: Record<string, unknown> = {};
         if (group && existingRole.groupId !== group.id) updateData.groupId = group.id;
         if (customRole) updateData.customRoleId = customRole.id;
+        if (group && existingRole.groupId !== group.id) updateData.groupId = group.id;
+        if (customRole) updateData.customRoleId = customRole.id;
+        if (sortOrderRaw !== undefined && sortOrderRaw !== "") updateData.sortOrder = sortOrder;
         if (Object.keys(updateData).length) {
           await prisma.activityUserRole.update({
             where: { id: existingRole.id },
@@ -322,22 +347,31 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
             groupId: group?.id,
             customRoleId: customRole?.id || null,
             isPrimary: true,
+            sortOrder,
           },
         });
       }
 
       if (group) {
         const students = await prisma.student.findMany({ where: { activityId, groupId: group.id } });
-        await prisma.scoreAssignment.createMany({
-          data: students.map((student) => ({
-            activityId,
-            studentId: student.id,
-            judgeUserId: user.id,
-            groupId: group.id,
-          })),
-          // @ts-expect-error skipDuplicates works at runtime with SQLite
-          skipDuplicates: true,
-        });
+        if (students.length) {
+          const existing = await prisma.scoreAssignment.findMany({
+            where: { activityId, judgeUserId: user.id },
+            select: { studentId: true },
+          });
+          const existingSet = new Set(existing.map((a) => a.studentId));
+          const newData = students
+            .filter((s) => !existingSet.has(s.id))
+            .map((student) => ({
+              activityId,
+              studentId: student.id,
+              judgeUserId: user.id,
+              groupId: group.id,
+            }));
+          if (newData.length) {
+            await prisma.scoreAssignment.createMany({ data: newData });
+          }
+        }
       }
     }
 

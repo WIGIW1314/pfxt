@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, nextTick } from 'vue'
+import PdfViewer from './PdfViewer.vue'
 
 export interface DocFile {
   name: string
@@ -87,12 +88,10 @@ onMounted(() => {
             <div class="doc-file-name">{{ file.name }}</div>
             <div v-if="file.description" class="doc-file-desc">{{ file.description }}</div>
           </div>
-          <a :href="file.url" target="_blank" class="doc-file-download" :download="file.name">
-            <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1v9M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            下载
-          </a>
         </div>
-        <iframe :src="file.url" class="pdf-frame" frameborder="0"></iframe>
+        <div class="pdf-viewer-wrap">
+          <PdfViewer :url="file.url" />
+        </div>
       </div>
 
       <div v-for="file in docxFiles" :key="file.name" class="doc-viewer-file">
@@ -102,10 +101,6 @@ onMounted(() => {
             <div class="doc-file-name">{{ file.name }}</div>
             <div v-if="file.description" class="doc-file-desc">{{ file.description }}</div>
           </div>
-          <a :href="file.url" target="_blank" class="doc-file-download" :download="file.name">
-            <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1v9M4 7l4 4 4-4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            下载
-          </a>
         </div>
         <div v-if="docxErrors[file.name]" class="doc-error">{{ docxErrors[file.name] }}</div>
         <div :ref="setDocxRef(file.name)" class="docx-container"></div>
@@ -207,28 +202,9 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.doc-file-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--el-color-primary, #409eff);
-  text-decoration: none;
-  white-space: nowrap;
-  padding: 4px 10px;
-  border: 1px solid var(--el-color-primary, #409eff);
-  border-radius: 4px;
-  transition: background 0.15s;
-}
-.doc-file-download:hover {
-  background: var(--el-color-primary-light-9, #ecf5ff);
-}
-
-.pdf-frame {
-  width: 100%;
-  height: 600px;
-  border: none;
-  display: block;
+.pdf-viewer-wrap {
+  padding: 16px;
+  background: var(--el-fill-color-extra-light, #f9f9f9);
 }
 
 .docx-container {

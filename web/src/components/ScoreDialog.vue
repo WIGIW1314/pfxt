@@ -13,6 +13,8 @@ const props = defineProps<{
   student: Student | null;
   template: ScoreTemplate | null;
   readonly?: boolean;
+  showCommentUi?: boolean;
+  showQuestionUi?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -270,14 +272,16 @@ async function generateQuestions() {
             </div>
           </div>
         </div>
-        <el-input v-model="form.comment" class="comment-font-field" :disabled="readonly" type="textarea" :rows="3" placeholder="请输入评语" style="margin-top: 14px" />
-        <div class="score-comment-toolbar">
-          <el-button type="primary" plain :disabled="readonly" :loading="generatingComment" @click="generateComment">AI生成评语</el-button>
-        </div>
-        <div class="muted" style="margin-top: 4px; font-size: 12px">AI 会根据当前评分信息自动生成更贴合的评语。</div>
+        <template v-if="props.showCommentUi !== false">
+          <el-input v-model="form.comment" class="comment-font-field" :disabled="readonly" type="textarea" :rows="3" placeholder="请输入评语" style="margin-top: 14px" />
+          <div class="score-comment-toolbar">
+            <el-button type="primary" plain :disabled="readonly" :loading="generatingComment" @click="generateComment">AI生成评语</el-button>
+          </div>
+          <div class="muted" style="margin-top: 4px; font-size: 12px">AI 会根据当前评分信息自动生成更贴合的评语。</div>
+        </template>
       </div>
 
-      <div class="glass-panel entity-card">
+      <div v-if="props.showQuestionUi !== false" class="glass-panel entity-card">
         <div class="panel-header" style="margin-bottom: 8px">
           <strong>AI 提问</strong>
           <span class="muted">生成 1-2 个简单追问</span>

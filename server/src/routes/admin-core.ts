@@ -111,6 +111,10 @@ async function normalizeActiveActivity() {
       isActive: true,
       isLocked: true,
       isPublicVisible: true,
+      showExportZip: true,
+      showExportXlsx: true,
+      showCommentUi: true,
+      showQuestionUi: true,
       allowEditScore: true,
       showAvgToJudge: true,
       showPeerScoresToJudge: true,
@@ -119,6 +123,8 @@ async function normalizeActiveActivity() {
       endTime: true,
       announcement: true,
       announcementFiles: true,
+      judgeAnnouncement: true,
+      judgeAnnouncementFiles: true,
       createdAt: true,
       templates: {
         select: {
@@ -163,6 +169,10 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
         isActive: true,
         isLocked: true,
         isPublicVisible: true,
+        showExportZip: true,
+        showExportXlsx: true,
+        showCommentUi: true,
+        showQuestionUi: true,
         allowEditScore: true,
         showAvgToJudge: true,
         showPeerScoresToJudge: true,
@@ -171,6 +181,8 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
         endTime: true,
         announcement: true,
         announcementFiles: true,
+        judgeAnnouncement: true,
+        judgeAnnouncementFiles: true,
         createdAt: true,
         templates: {
           select: {
@@ -280,13 +292,20 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
       }
     }
 
-    // announcementFiles 通过 raw SQL 更新 (Prisma client 可能尚未重新生成)
+    // announcementFiles / judgeAnnouncementFiles 通过 raw SQL 更新 (JSON 字段)
     let announcementFilesValue: string | undefined;
     if (body.announcementFiles !== undefined) {
       announcementFilesValue = typeof body.announcementFiles === "string"
         ? body.announcementFiles
         : JSON.stringify(body.announcementFiles);
       delete body.announcementFiles;
+    }
+    let judgeAnnouncementFilesValue: string | undefined;
+    if (body.judgeAnnouncementFiles !== undefined) {
+      judgeAnnouncementFilesValue = typeof body.judgeAnnouncementFiles === "string"
+        ? body.judgeAnnouncementFiles
+        : JSON.stringify(body.judgeAnnouncementFiles);
+      delete body.judgeAnnouncementFiles;
     }
 
     const activity = await prisma.activity.update({
@@ -298,6 +317,13 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
       await prisma.$executeRawUnsafe(
         `UPDATE "Activity" SET "announcementFiles" = ? WHERE "id" = ?`,
         announcementFilesValue,
+        activityId,
+      );
+    }
+    if (judgeAnnouncementFilesValue !== undefined) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "Activity" SET "judgeAnnouncementFiles" = ? WHERE "id" = ?`,
+        judgeAnnouncementFilesValue,
         activityId,
       );
     }
@@ -357,12 +383,18 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
           isActive: false,
           isLocked: false,
           isPublicVisible: body.isPublicVisible ?? false,
+          showExportZip: sourceActivity.showExportZip,
+          showExportXlsx: sourceActivity.showExportXlsx,
+          showCommentUi: sourceActivity.showCommentUi,
+          showQuestionUi: sourceActivity.showQuestionUi,
           allowEditScore: sourceActivity.allowEditScore,
           showAvgToJudge: sourceActivity.showAvgToJudge,
           showPeerScoresToJudge: sourceActivity.showPeerScoresToJudge,
           showGroupProgressToSecretary: sourceActivity.showGroupProgressToSecretary,
           announcement: sourceActivity.announcement,
           announcementFiles: sourceActivity.announcementFiles,
+          judgeAnnouncement: sourceActivity.judgeAnnouncement,
+          judgeAnnouncementFiles: sourceActivity.judgeAnnouncementFiles,
           startTime: toDateOrNull(body.startTime),
           endTime: toDateOrNull(body.endTime),
           createdBy: request.user.userId,
@@ -716,6 +748,7 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
           },
         },
         activityRoles: {
+          orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
           select: {
             id: true,
             role: true,

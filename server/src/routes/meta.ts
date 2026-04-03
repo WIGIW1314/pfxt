@@ -1,7 +1,16 @@
 import type { FastifyInstance } from "fastify";
+import { prisma } from "../db.js";
 import { createWorkbookTemplate } from "../utils.js";
 
 export async function registerMetaRoutes(app: FastifyInstance) {
+  app.get("/api/meta/active-title", async (_request, reply) => {
+    const activity = await prisma.activity.findFirst({
+      where: { isActive: true },
+      select: { name: true },
+    });
+    return reply.send({ title: activity?.name || null });
+  });
+
   app.get("/api/meta/templates/students", { preHandler: [app.authenticate] }, async (_request, reply) => {
     const buffer = await createWorkbookTemplate(
       "学生导入模板",
@@ -41,6 +50,7 @@ export async function registerMetaRoutes(app: FastifyInstance) {
         { header: "默认密码", key: "password", width: 14 },
         { header: "组别", key: "groupName", width: 14 },
         { header: "活动角色", key: "customRoleName", width: 14 },
+        { header: "组内顺序", key: "sortOrder", width: 12 },
       ],
       [
         {
@@ -49,6 +59,7 @@ export async function registerMetaRoutes(app: FastifyInstance) {
           password: "123456",
           groupName: "第一组",
           customRoleName: "主评委",
+          sortOrder: 1,
         },
       ],
     );

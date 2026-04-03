@@ -62,8 +62,14 @@ model Activity {
   showAvgToJudge               Boolean            @default(false)
   showPeerScoresToJudge        Boolean            @default(false)
   showGroupProgressToSecretary Boolean            @default(true)
+  showExportZip                Boolean            @default(true)
+  showExportXlsx               Boolean            @default(true)
+  showCommentUi                Boolean            @default(true)
+  showQuestionUi               Boolean            @default(true)
   announcement                 String?
-  announcementFiles            String?            // JSON: [{name,path,type}]
+  announcementFiles            String?            // JSON: [{name,url,type,description}]
+  judgeAnnouncement            String?
+  judgeAnnouncementFiles       String?            // JSON: [{name,url,type,description}]
   startTime                    DateTime?
   endTime                      DateTime?
   createdBy                    String
@@ -127,6 +133,7 @@ model ActivityUserRole {
   groupId    String?
   customRoleId String?
   isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
   activity   Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)

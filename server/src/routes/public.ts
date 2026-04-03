@@ -16,6 +16,7 @@ export async function registerPublicRoutes(app: FastifyInstance) {
               include: { customRole: true } as any,
             },
             activityRoles: {
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] as any,
               include: {
                 user: { select: { id: true, realName: true, username: true } },
                 customRole: true,

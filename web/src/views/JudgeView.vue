@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { ArrowDown, Calendar, Check, Document, Download, EditPen, Files, Lock, Postcard, Search, UploadFilled, User, View, Warning } from "@element-plus/icons-vue";
+import { ArrowDown, Calendar, ChatLineSquare, Check, Document, Download, EditPen, Files, Lock, Postcard, Search, UploadFilled, User, View, Warning } from "@element-plus/icons-vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import AppShell from "../components/AppShell.vue";
+import DocViewer from "../components/DocViewer.vue";
 import { api, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { useSyncStore } from "../stores/sync";
@@ -101,6 +102,16 @@ const lockReason = computed(() => {
   return "";
 });
 const avgDecimalPlaces = computed(() => Number(currentActivity.value?.activity?.avgDecimalPlaces ?? 2));
+const showExportZip = computed(() => currentActivity.value?.activity?.showExportZip !== false);
+const showExportXlsx = computed(() => currentActivity.value?.activity?.showExportXlsx !== false);
+const showCommentUi = computed(() => currentActivity.value?.activity?.showCommentUi !== false);
+const showQuestionUi = computed(() => currentActivity.value?.activity?.showQuestionUi !== false);
+const judgeAnnouncementHtml = computed(() => currentActivity.value?.activity?.judgeAnnouncement || '');
+const judgeAnnouncementDocFiles = computed(() => {
+  const raw = (currentActivity.value?.activity as any)?.judgeAnnouncementFiles;
+  if (!raw) return [];
+  try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return []; }
+});
 const isTotalOnly = computed(() => template.value?.scoreMode === "TOTAL" || !template.value?.items?.length);
 const filteredStudents = computed(() =>
   students.value.filter((student) =>
@@ -978,11 +989,11 @@ onBeforeRouteUpdate(async () => {
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item class="judge-export-item" command="evaluation-docx-zip">
+                    <el-dropdown-item v-if="showExportZip" class="judge-export-item" command="evaluation-docx-zip">
                       <el-icon color="#d35400"><Document /></el-icon>
                       <span>导出教学评价表zip</span>
                     </el-dropdown-item>
-                    <el-dropdown-item class="judge-export-item" command="xlsx">
+                    <el-dropdown-item v-if="showExportXlsx" class="judge-export-item" command="xlsx">
                       <el-icon color="#2f80ed"><Files /></el-icon>
                       <span>导出为 xlsx</span>
                     </el-dropdown-item>
@@ -1090,7 +1101,7 @@ onBeforeRouteUpdate(async () => {
             </template>
           </el-table-column>
 
-          <el-table-column label="评语" :min-width="compactScoreTable ? 184 : 132">
+          <el-table-column v-if="showCommentUi" label="评语" :min-width="compactScoreTable ? 184 : 132">
             <template #default="{ row }">
               <div class="row-comment-box">
                 <el-input
@@ -1154,12 +1165,32 @@ onBeforeRouteUpdate(async () => {
       </section>
     </template>
 
+    <template v-else-if="section === 'announcement'">
+      <div
+        v-if="!judgeAnnouncementHtml && !judgeAnnouncementDocFiles.length"
+        class="glass-panel"
+        style="padding: 48px 20px; text-align: center"
+      >
+        <div style="font-size: 36px; opacity: 0.25; margin-bottom: 12px">📬</div>
+        <div class="muted" style="font-size: 14px">暂无评委公告</div>
+      </div>
+      <div v-else class="glass-panel judge-announcement-panel">
+        <div class="judge-announcement-header">
+          <el-icon :size="16" style="color: var(--el-color-primary)"><ChatLineSquare /></el-icon>
+          <span>评委公告</span>
+        </div>
+        <DocViewer :html="judgeAnnouncementHtml" :files="judgeAnnouncementDocFiles" />
+      </div>
+    </template>
+
     <ScoreDialog
       v-model="scoreOpen"
       :activity-id="activityId"
       :student="currentStudent"
       :template="template"
       :readonly="isLocked"
+      :show-comment-ui="showCommentUi"
+      :show-question-ui="showQuestionUi"
       @success="handleSingleScoreSuccess"
     />
 
@@ -1321,5 +1352,21 @@ onBeforeRouteUpdate(async () => {
 
 .export-progress-status {
   min-height: 20px;
+}
+
+.judge-announcement-panel {
+  padding: 20px 24px;
+}
+
+.judge-announcement-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
 }
 </style>

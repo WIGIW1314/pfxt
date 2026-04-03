@@ -10,6 +10,8 @@ export async function parseWorkbook(file: Awaited<ReturnType<FastifyRequest["fil
   const buffer = await file.toBuffer();
   await workbook.xlsx.load(buffer as any);
   const sheet = workbook.worksheets[0];
-  const rows = sheet.getSheetValues().slice(2) as Array<Array<string | number | undefined>>;
-  return rows.map((cells) => cells.slice(1));
+  const rows = sheet.getSheetValues().slice(2) as Array<Array<string | number | undefined> | null | undefined>;
+  return rows
+    .filter((cells): cells is Array<string | number | undefined> => cells != null)
+    .map((cells) => cells.slice(1));
 }
