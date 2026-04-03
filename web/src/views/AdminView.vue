@@ -555,10 +555,6 @@ async function handleJudgeAnnouncementFileUpload(uploadFile: any) {
   }
 }
 
-function removeAnnouncementFile(index: number) {
-  announcementFiles.value.splice(index, 1);
-}
-
 async function saveAnnouncement() {
   announcementSaving.value = true;
   try {
