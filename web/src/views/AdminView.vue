@@ -2425,20 +2425,6 @@ onUnmounted(() => {
               <el-input-number v-model="activitySettingsForm.avgDecimalPlaces" :min="0" :max="4" :disabled="currentActivityLocked" style="width: 100%" />
             </el-form-item>
           </div>
-          <div class="compact-grid cols-2" style="margin-top: 12px">
-            <el-form-item label="导出选项">
-              <div style="display: flex; flex-direction: column; gap: 8px">
-                <el-switch v-model="activitySettingsForm.showExportZip" :disabled="currentActivityLocked" active-text="显示导出评价表（ZIP）" />
-                <el-switch v-model="activitySettingsForm.showExportXlsx" :disabled="currentActivityLocked" active-text="显示导出 XLSX" />
-              </div>
-            </el-form-item>
-            <el-form-item label="评委评分 UI">
-              <div style="display: flex; flex-direction: column; gap: 8px">
-                <el-switch v-model="activitySettingsForm.showCommentUi" :disabled="currentActivityLocked" active-text="显示评语相关 UI" />
-                <el-switch v-model="activitySettingsForm.showQuestionUi" :disabled="currentActivityLocked" active-text="显示提问相关 UI" />
-              </div>
-            </el-form-item>
-          </div>
         </el-form>
         <div class="tag-row">
           <el-tag round type="primary">当前生效：{{ activeTemplate?.name || "未选择模板" }}</el-tag>

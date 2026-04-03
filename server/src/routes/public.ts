@@ -32,7 +32,7 @@ export async function registerPublicRoutes(app: FastifyInstance) {
     });
 
     if (!activity) {
-      return reply.status(404).send({ message: "暂无可见活动" });
+      return { available: false };
     }
 
     const data = activity as any;

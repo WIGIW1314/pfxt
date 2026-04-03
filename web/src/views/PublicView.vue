@@ -33,6 +33,7 @@ const section = computed(() => (route.params.section as string) || "groups");
 const loading = ref(true);
 const previewQrcode = ref<{ url: string; name: string } | null>(null);
 const error = ref("");
+const notOpen = ref(false);
 const activity = ref<any>(null);
 const collapsedGroups = ref<Record<string, boolean>>({});
 const collapsedStudentLists = ref<Record<string, boolean>>({});
@@ -78,9 +79,14 @@ useModalHistory(
 async function fetchData() {
   loading.value = true;
   error.value = "";
+  notOpen.value = false;
   try {
     const { data } = await api.get("/api/public/active-activity");
-    activity.value = data;
+    if (data.available === false) {
+      notOpen.value = true;
+    } else {
+      activity.value = data;
+    }
   } catch (e: any) {
     error.value = e.response?.data?.message || "获取活动信息失败";
   } finally {
@@ -92,7 +98,13 @@ async function fetchData() {
 async function silentRefresh() {
   try {
     const { data } = await api.get("/api/public/active-activity");
-    activity.value = data;
+    if (data.available === false) {
+      notOpen.value = true;
+      activity.value = null;
+    } else {
+      notOpen.value = false;
+      activity.value = data;
+    }
   } catch {
     // keep current data on transient errors
   }
@@ -197,6 +209,13 @@ function hasRoleDuty(student: any) {
     <div v-if="loading" style="text-align: center; padding: 60px 0">
       <el-icon class="is-loading" :size="28" color="var(--primary)"><Calendar /></el-icon>
       <p style="color: var(--muted); margin-top: 12px; font-size: 13px">加载中…</p>
+    </div>
+
+    <!-- 活动未开放 -->
+    <div v-else-if="notOpen" class="glass-panel public-not-open">
+      <el-icon :size="44" class="public-not-open-icon"><InfoFilled /></el-icon>
+      <div class="public-not-open-title">活动暂未开放</div>
+      <div class="public-not-open-desc">管理员尚未开放公共页，请稍后再试或联系管理员。</div>
     </div>
 
     <!-- 错误 -->
@@ -431,6 +450,34 @@ function hasRoleDuty(student: any) {
 </template>
 
 <style scoped>
+.public-not-open {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 60px 24px 48px;
+  text-align: center;
+}
+
+.public-not-open-icon {
+  color: #b0bec5;
+  opacity: 0.7;
+}
+
+.public-not-open-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.public-not-open-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.6;
+  max-width: 280px;
+}
+
 .public-search-bar {
   padding: 0;
   margin-bottom: 10px;
