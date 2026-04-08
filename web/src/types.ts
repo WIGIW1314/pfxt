@@ -56,6 +56,7 @@ export type Activity = {
   showQuestionUi: boolean;
   allowEditScore: boolean;
   showAvgToJudge: boolean;
+  showVoteCountToJudge: boolean;
   startTime?: string | null;
   endTime?: string | null;
   announcement?: string | null;
@@ -140,6 +141,7 @@ export type Student = {
     }>;
   }>;
   myScoreStatus?: "DRAFT" | "SUBMITTED" | null;
+  myVoted?: boolean;
   scores?: Score[];
 };
 

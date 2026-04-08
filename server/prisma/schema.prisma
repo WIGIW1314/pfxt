@@ -62,6 +62,7 @@ model Activity {
   showAvgToJudge               Boolean            @default(false)
   showPeerScoresToJudge        Boolean            @default(false)
   showGroupProgressToSecretary Boolean            @default(true)
+  showVoteCountToJudge        Boolean            @default(false)
   showExportZip                Boolean            @default(true)
   showExportXlsx               Boolean            @default(true)
   showCommentUi                Boolean            @default(true)

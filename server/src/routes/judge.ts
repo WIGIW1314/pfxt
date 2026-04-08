@@ -594,6 +594,10 @@ function validateScoreInput(
   }
 }
 
+function isVotingActivity(activity: { type?: string | null } | null | undefined): boolean {
+  return activity?.type === "投票";
+}
+
 function buildContentDisposition(filename: string, fallback: string) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
@@ -734,6 +738,23 @@ async function getEffectiveTemplate(activityId: string, requestedTemplateId?: st
       },
     },
   });
+
+  if (isVotingActivity(activity)) {
+    let votingTemplate = activity.templates.find((t) => t.name === "投票评分表");
+    if (!votingTemplate) {
+      votingTemplate = await prisma.scoreTemplate.create({
+        data: {
+          activityId,
+          name: "投票评分表",
+          scoreMode: "TOTAL",
+          totalScore: 1,
+          isDefault: true,
+        },
+        include: { items: { orderBy: { sortOrder: "asc" } } },
+      });
+    }
+    return { activity, template: votingTemplate };
+  }
 
   const selectedTemplate =
     activity.templates.find((item) => item.id === requestedTemplateId) ||
@@ -1778,11 +1799,72 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     });
     const summaryMap = await getStudentSummaryMap(activityId, students.map((student) => student.id));
 
+    const activityInfo = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    const votingMode = isVotingActivity(activityInfo);
+
     return students.map((student) => ({
       ...student,
+      myVoted: votingMode ? student.scores.some((s) => s.status === ScoreStatus.SUBMITTED) : undefined,
       myScoreStatus: student.scores[0]?.status ?? null,
       summary: summaryMap.get(student.id) || null,
     }));
+  });
+
+  // POST vote
+  app.post("/api/judge/activities/:activityId/students/:studentId/vote", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
+    const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activity = await prisma.activity.findUniqueOrThrow({
+      where: { id: activityId },
+      select: { type: true, isLocked: true },
+    });
+    if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
+    await ensureActivityUnlocked(activityId);
+    const { student } = await ensureJudgeAccess(activityId, studentId, request.user.userId);
+    await ensureGroupUnlocked(student.groupId);
+
+    let votingTemplate = await prisma.scoreTemplate.findFirst({ where: { activityId, name: "投票评分表" } });
+    if (!votingTemplate) {
+      votingTemplate = await prisma.scoreTemplate.create({
+        data: { activityId, name: "投票评分表", scoreMode: "TOTAL", totalScore: 1, isDefault: true },
+      });
+    }
+
+    const score = await prisma.score.upsert({
+      where: { activityId_studentId_judgeUserId: { activityId, studentId, judgeUserId: request.user.userId } },
+      update: {
+        templateId: votingTemplate.id, totalScore: 1,
+        status: ScoreStatus.SUBMITTED, submittedAt: new Date(),
+        comment: null, details: { deleteMany: {} },
+      },
+      create: {
+        activityId, studentId, judgeUserId: request.user.userId, groupId: student.groupId,
+        templateId: votingTemplate.id, totalScore: 1,
+        status: ScoreStatus.SUBMITTED, submittedAt: new Date(),
+      },
+      include: { details: true },
+    });
+    broadcast("score.updated", { activityId, studentId, status: "SUBMITTED" });
+    return score;
+  });
+
+  // DELETE withdraw vote
+  app.delete("/api/judge/activities/:activityId/students/:studentId/vote", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
+    const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activity = await prisma.activity.findUniqueOrThrow({
+      where: { id: activityId },
+      select: { type: true, isLocked: true },
+    });
+    if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
+    await ensureActivityUnlocked(activityId);
+
+    const existing = await prisma.score.findFirst({
+      where: { activityId, studentId, judgeUserId: request.user.userId },
+    });
+    if (!existing) throw createHttpError("当前没有投票记录", 400);
+
+    await prisma.score.delete({ where: { id: existing.id } });
+    broadcast("score.updated", { activityId, studentId, status: "DELETED" });
+    return { success: true };
   });
 
   app.get("/api/judge/activities/:activityId/students/:studentId", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
@@ -1801,15 +1883,19 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
       }),
       getAnonymousPeerScores(activityId, studentId, request.user.userId),
     ]);
+    const votingMode = isVotingActivity(student.activity);
     return {
       ...student,
-      peerScores,
+      votingMode,
+      peerScores: votingMode ? [] : peerScores,
       summary: await getStudentSummary(activityId, student.id),
     };
   });
 
   app.post("/api/judge/activities/:activityId/students/:studentId/generate-comment", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，不支持此功能", 400);
     const body = request.body as {
       totalScore: number;
       templateId?: string;
@@ -1857,6 +1943,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.post("/api/judge/activities/:activityId/students/:studentId/generate-questions", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，不支持此功能", 400);
     const body = request.body as { topic?: string };
       const topic = String(body.topic || "教师资格与教育教学素养").trim() || "教师资格与教育教学素养";
 
@@ -1867,6 +1955,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.post("/api/judge/activities/:activityId/students/:studentId/save-draft", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，请使用投票功能", 400);
     const body = request.body as {
       templateId: string;
       totalScore: number;
@@ -1926,6 +2016,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.post("/api/judge/activities/:activityId/students/:studentId/submit-score", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，请使用投票功能", 400);
     const body = request.body as {
       templateId: string;
       totalScore: number;
@@ -2001,6 +2093,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
   // --- Batch save-draft ---
   app.post("/api/judge/activities/:activityId/batch-save-draft", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId } = request.params as { activityId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，请使用投票功能", 400);
     const body = request.body as {
       templateId: string;
       rows: Array<{
@@ -2071,6 +2165,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
   // --- Batch submit-score ---
   app.post("/api/judge/activities/:activityId/batch-submit-score", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId } = request.params as { activityId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，请使用投票功能", 400);
     const body = request.body as {
       templateId: string;
       rows: Array<{
@@ -2163,6 +2259,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.delete("/api/judge/activities/:activityId/students/:studentId/reset-score", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，请使用投票撤回功能", 400);
 
     await ensureActivityUnlocked(activityId);
     const { student } = await ensureJudgeAccess(activityId, studentId, request.user.userId);
@@ -2190,6 +2288,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
   // --- Batch reset-score ---
   app.delete("/api/judge/activities/:activityId/batch-reset-score", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId } = request.params as { activityId: string };
+    const activityTypeCheck = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    if (isVotingActivity(activityTypeCheck)) throw createHttpError("当前活动为投票模式，请使用投票撤回功能", 400);
     const body = request.body as { studentIds: string[] };
 
     if (!Array.isArray(body.studentIds) || body.studentIds.length === 0) {
@@ -2226,10 +2326,28 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.get("/api/judge/activities/:activityId/progress", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId } = request.params as { activityId: string };
+    const activityInfo = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    const votingMode = isVotingActivity(activityInfo);
+
+    const bindings = await prisma.activityUserRole.findMany({
+      where: { activityId, userId: request.user.userId, role: { in: [UserRole.JUDGE, UserRole.SECRETARY] } },
+      select: { groupId: true },
+    });
+    const groupIds = bindings.map((b) => b.groupId).filter(Boolean) as string[];
+
+    if (votingMode) {
+      const total = await prisma.student.count({ where: { activityId, groupId: { in: groupIds } } });
+      const submitted = await prisma.score.count({
+        where: { activityId, judgeUserId: request.user.userId, status: ScoreStatus.SUBMITTED },
+      });
+      return { total, submitted, draft: 0, pending: total - submitted };
+    }
+
     const [total, submittedCount, draftCount] = await Promise.all([
       prisma.student.count({
         where: {
           activityId,
+          groupId: { in: groupIds },
           assignments: { some: { judgeUserId: request.user.userId } },
         },
       }),

@@ -13,6 +13,10 @@ import {
 } from "../utils.js";
 import { parseWorkbook } from "./helpers.js";
 
+function isVotingActivity(activity: { type?: string | null } | null | undefined): boolean {
+  return activity?.type === "投票";
+}
+
 async function assertTemplateUnused(templateId: string) {
   const scoreCount = await prisma.score.count({ where: { templateId } });
   if (scoreCount > 0) {
@@ -547,6 +551,10 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
   app.get("/api/admin/activities/:activityId/results", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     await requireAdmin(request);
     const activityId = (request.params as { activityId: string }).activityId;
+
+    const activity = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    const votingMode = isVotingActivity(activity);
+
     const students = await prisma.student.findMany({
       where: { activityId },
       select: {
@@ -568,17 +576,41 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
       orderBy: [{ group: { sortOrder: "asc" } }, { orderNo: "asc" }],
     });
     const summaryMap = await getStudentSummaryMap(activityId, students.map((student) => student.id));
-    const enriched = students.map((student) => ({
-      ...student,
-      summary: summaryMap.get(student.id) || null,
-    }));
 
-    return enriched
-      .sort((a, b) => (b.summary.finalScore ?? 0) - (a.summary.finalScore ?? 0))
-      .map((student, index) => ({
+    // ▼ 投票模式：额外获取投票数据 ▼
+    let voteDataMap = new Map<string, { count: number; judges: string[] }>();
+    if (votingMode) {
+      const submittedScores = await prisma.score.findMany({
+        where: { activityId, status: ScoreStatus.SUBMITTED },
+        include: { judge: { select: { realName: true } } },
+      });
+      for (const score of submittedScores) {
+        const existing = voteDataMap.get(score.studentId) || { count: 0, judges: [] as string[] };
+        existing.count++;
+        existing.judges.push(score.judge.realName);
+        voteDataMap.set(score.studentId, existing);
+      }
+    }
+
+    const enriched = students.map((student) => {
+      const summary = summaryMap.get(student.id) || null;
+      const voteData = voteDataMap.get(student.id) || { count: 0, judges: [] as string[] };
+      return {
         ...student,
-        rankNo: index + 1,
-      }));
+        summary,
+        voteCount: votingMode ? voteData.count : undefined,
+        votedJudgeNames: votingMode ? voteData.judges.join("、") : undefined,
+      };
+    });
+
+    if (votingMode) {
+      return enriched
+        .sort((a, b) => (b.voteCount ?? 0) - (a.voteCount ?? 0))
+        .map((student, index) => ({ ...student, rankNo: index + 1 }));
+    }
+    return enriched
+      .sort((a, b) => (b.summary?.finalScore ?? 0) - (a.summary?.finalScore ?? 0))
+      .map((student, index) => ({ ...student, rankNo: index + 1 }));
   });
 
   app.get("/api/admin/activities/:activityId/statistics", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {

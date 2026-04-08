@@ -22,6 +22,10 @@ import {
 } from "../utils.js";
 import { parseWorkbook } from "./helpers.js";
 
+function isVotingActivity(activity: { type?: string | null } | null | undefined): boolean {
+  return activity?.type === "投票";
+}
+
 function formatExportScore(value: number | null | undefined, decimalPlaces = 2) {
   if (value === null || value === undefined) return "";
   return Number(value).toFixed(decimalPlaces);
@@ -119,6 +123,7 @@ async function normalizeActiveActivity() {
       showAvgToJudge: true,
       showPeerScoresToJudge: true,
       showGroupProgressToSecretary: true,
+      showVoteCountToJudge: true,
       startTime: true,
       endTime: true,
       announcement: true,
@@ -177,6 +182,7 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
         showAvgToJudge: true,
         showPeerScoresToJudge: true,
         showGroupProgressToSecretary: true,
+        showVoteCountToJudge: true,
         startTime: true,
         endTime: true,
         announcement: true,
@@ -255,7 +261,7 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
     const body = request.body as Record<string, unknown>;
     const currentActivity = await prisma.activity.findUniqueOrThrow({
       where: { id: activityId },
-      select: { isLocked: true },
+      select: { isLocked: true, type: true },
     });
 
     const fields = Object.keys(body);
@@ -285,6 +291,32 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
       }
       body.avgDecimalPlaces = decimalPlaces;
     }
+
+    // 活动类型切换检测（评分 ↔ 投票）
+    const currentType = currentActivity.type as string | undefined;
+    const newType = body.type !== undefined ? String(body.type) : currentType;
+    const typeChanged = String(newType) !== String(currentType);
+
+    if (typeChanged) {
+      const scoreCount = await prisma.score.count({ where: { activityId } });
+      const studentCount = await prisma.student.count({ where: { activityId } });
+
+      if ((scoreCount > 0 || studentCount > 0) && body.__confirmTypeSwitch !== true) {
+        throw createHttpError(
+          `切换活动类型将清除所有现有评分数据（${scoreCount} 条评分记录，${studentCount} 个学生及分配信息）。如确认切换，请在请求中传入 __confirmTypeSwitch: true`,
+          409,
+        );
+      }
+
+      if (body.__confirmTypeSwitch === true) {
+        await prisma.$transaction([
+          prisma.scoreDetail.deleteMany({ where: { score: { activityId } } }),
+          prisma.score.deleteMany({ where: { activityId } }),
+          prisma.scoreAssignment.deleteMany({ where: { activityId } }),
+        ]);
+      }
+    }
+    delete (body as Record<string, unknown>).__confirmTypeSwitch;
 
     for (const field of ["startTime", "endTime"] as const) {
       if (body[field] !== undefined) {
@@ -1100,7 +1132,7 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
     const [activity, results] = await Promise.all([
       prisma.activity.findUniqueOrThrow({
         where: { id: activityId },
-        select: { name: true, code: true, avgDecimalPlaces: true },
+        select: { name: true, code: true, avgDecimalPlaces: true, type: true },
       }),
       prisma.student.findMany({
         where: { activityId },
@@ -1125,6 +1157,100 @@ export async function registerAdminCoreRoutes(app: FastifyInstance) {
       }),
     ]);
     const avgDecimalPlaces = activity.avgDecimalPlaces ?? 2;
+    const votingMode = isVotingActivity(activity);
+
+    // ▼ 投票模式导出 ▼
+    if (votingMode) {
+      const voteScores = await prisma.score.findMany({
+        where: { activityId, status: ScoreStatus.SUBMITTED },
+        include: { judge: { select: { realName: true } } },
+      });
+      const voteCountMap = new Map<string, { count: number; judges: string[] }>();
+      for (const score of voteScores) {
+        const existing = voteCountMap.get(score.studentId) || { count: 0, judges: [] as string[] };
+        existing.count++;
+        existing.judges.push(score.judge.realName);
+        voteCountMap.set(score.studentId, existing);
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "线上评分系统";
+      workbook.created = new Date();
+
+      const sheet = workbook.addWorksheet("投票结果");
+      sheet.columns = [
+        { header: "排名", key: "rankNo", width: 8 },
+        { header: "组别", key: "groupName", width: 12 },
+        { header: "顺序号", key: "orderNo", width: 10 },
+        { header: "学号", key: "studentNo", width: 16 },
+        { header: "姓名", key: "name", width: 12 },
+        { header: "性别", key: "gender", width: 8 },
+        { header: "班级", key: "className", width: 16 },
+        { header: "得票数", key: "voteCount", width: 10 },
+        { header: "投票评委", key: "judgeNames", width: 36 },
+      ];
+
+      const lastCol = toExcelColumnName(sheet.columns!.length);
+      sheet.mergeCells(`A1:${lastCol}1`);
+      const titleCell = sheet.getCell("A1");
+      titleCell.value = `${activity.name} 投票结果表`;
+      titleCell.font = { bold: true, size: 18, color: { argb: "1F2D3D" } };
+      titleCell.alignment = { horizontal: "center", vertical: "middle" };
+      titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F5F9FF" } };
+      sheet.getRow(1).height = 30;
+
+      sheet.mergeCells(`A2:${lastCol}2`);
+      sheet.getCell("A2").value = `活动编码：${activity.code}    导出时间：${dayjs().format("YYYY/MM/DD HH:mm:ss")}`;
+      sheet.getCell("A2").font = { size: 11, color: { argb: "6B7A99" } };
+      sheet.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
+      sheet.getRow(2).height = 22;
+
+      const headerRow = sheet.getRow(3);
+      (sheet.columns as ExcelJS.Column[]).forEach((column, index) => {
+        const cell = headerRow.getCell(index + 1);
+        cell.value = column.header as string;
+        cell.font = { bold: true, color: { argb: "2B3A55" } };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "DDEAFB" } };
+        cell.border = { top: { style: "thin", color: { argb: "C9D8EE" } }, left: { style: "thin", color: { argb: "C9D8EE" } }, bottom: { style: "thin", color: { argb: "C9D8EE" } }, right: { style: "thin", color: { argb: "C9D8EE" } } };
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      });
+      headerRow.height = 24;
+
+      const enriched = results.map((student: any) => {
+        const vc = voteCountMap.get(student.id) || { count: 0, judges: [] };
+        return { student, voteCount: vc.count, judgeNames: vc.judges.join("、") };
+      });
+
+      enriched.sort((a: any, b: any) => b.voteCount - a.voteCount)
+        .forEach((item: any, index: number) => {
+          const row = sheet.addRow({
+            rankNo: index + 1,
+            groupName: item.student.group?.name || "",
+            orderNo: item.student.orderNo,
+            studentNo: item.student.studentNo,
+            name: item.student.name,
+            gender: item.student.gender || "",
+            className: item.student.className || "",
+            voteCount: item.voteCount,
+            judgeNames: item.judgeNames || "暂无",
+          });
+          row.height = 24;
+          row.eachCell((cell) => {
+            cell.border = { top: { style: "thin", color: { argb: "E4ECF8" } }, left: { style: "thin", color: { argb: "E4ECF8" } }, bottom: { style: "thin", color: { argb: "E4ECF8" } }, right: { style: "thin", color: { argb: "E4ECF8" } } };
+            cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+            if (row.number % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FAFCFF" } };
+          });
+        });
+
+      sheet.views = [{ state: "frozen", ySplit: 3 }];
+      sheet.autoFilter = `A3:${lastCol}3`;
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      reply.header("Content-Disposition", buildContentDisposition(`${activity.name}投票结果表.xlsx`, "voting-results.xlsx"));
+      return reply.send(buffer);
+    }
+    // ▲ 投票模式导出结束 ▼
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "线上评分系统";

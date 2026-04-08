@@ -49,6 +49,7 @@ function ringStrokeColor(progress: number): string {
   return '#d1d5db';
 }
 const currentActivityLocked = computed(() => Boolean(currentActivity.value?.isLocked));
+const isVotingMode = computed(() => currentActivity.value?.type === "投票");
 const onlineRoleLabelMap: Record<string, string> = {
   SUPER_ADMIN: "系统管理员",
   ACTIVITY_ADMIN: "管理员",
@@ -98,6 +99,8 @@ type ResultRow = {
     name: string;
   } | null;
   summary: ResultSummary | null;
+  voteCount?: number;
+  votedJudgeNames?: string;
 };
 const results = ref<ResultRow[]>([]);
 const activeTemplate = computed(
@@ -245,7 +248,7 @@ const paginatedResults = computed(() => {
   return filteredResults.value.slice(start, start + resultPageSize.value);
 });
 const resultEmptyDescription = computed(() => {
-  if (!results.value.length) return "暂无评分数据";
+  if (!results.value.length) return isVotingMode.value ? "暂无投票数据" : "暂无评分数据";
   return "没有符合当前筛选条件的结果";
 });
 watch([results, resultKeyword, resultGroupFilter, resultStatusFilter, resultScoreFilter], () => {
@@ -417,8 +420,8 @@ const activityForm = reactive({
   showExportXlsx: true,
   showCommentUi: true,
   showQuestionUi: true,
+  showVoteCountToJudge: false,
 });
-
 
 // 修改密码弹窗相关
 const passwordDialog = ref(false);
@@ -623,6 +626,7 @@ const activitySettingsForm = reactive({
   showExportXlsx: true,
   showCommentUi: true,
   showQuestionUi: true,
+  showVoteCountToJudge: false,
 });
 
 function createDefaultTemplateItems() {
@@ -693,6 +697,7 @@ function syncActivitySettings() {
   activitySettingsForm.showExportXlsx = currentActivity.value?.showExportXlsx ?? true;
   activitySettingsForm.showCommentUi = currentActivity.value?.showCommentUi ?? true;
   activitySettingsForm.showQuestionUi = currentActivity.value?.showQuestionUi ?? true;
+  activitySettingsForm.showVoteCountToJudge = currentActivity.value?.showVoteCountToJudge ?? false;
 }
 
 function resetActivityForm() {
@@ -713,6 +718,7 @@ function resetActivityForm() {
     showExportXlsx: true,
     showCommentUi: true,
     showQuestionUi: true,
+    showVoteCountToJudge: false,
   });
 }
 
@@ -797,24 +803,30 @@ function openCreateActivity() {
   activityDialog.value = true;
 }
 
-function openEditActivity(activity: Activity) {
+function openEditActivity(_activity: Activity) {
   activityDialogMode.value = "edit";
   cloningSourceActivityId.value = "";
-  editingActivityId.value = activity.id;
-  Object.assign(activityForm, {
-    name: activity.name,
-    code: activity.code,
-    type: activity.type,
-    scoreMode: activity.scoreMode,
-    calcMode: activity.calcMode,
-    description: activity.description || "",
-    startTime: activity.startTime ? formatBJ(activity.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
-    endTime: activity.endTime ? formatBJ(activity.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
-    isPublicVisible: activity.isPublicVisible,
-    showExportZip: activity.showExportZip ?? true,
-    showExportXlsx: activity.showExportXlsx ?? true,
-    showCommentUi: activity.showCommentUi ?? true,
-    showQuestionUi: activity.showQuestionUi ?? true,
+  editingActivityId.value = _activity.id;
+  // 通过 API 重新获取最新数据，确保字段完整
+  api.get("/api/admin/activities").then(({ data: list }) => {
+    const activity = list.find((a: any) => a.id === editingActivityId.value);
+    if (!activity) return;
+    Object.assign(activityForm, {
+      name: activity.name,
+      code: activity.code,
+      type: activity.type,
+      scoreMode: activity.scoreMode,
+      calcMode: activity.calcMode,
+      description: activity.description || "",
+      startTime: activity.startTime ? formatBJ(activity.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
+      endTime: activity.endTime ? formatBJ(activity.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
+      isPublicVisible: activity.isPublicVisible,
+      showExportZip: activity.showExportZip ?? true,
+      showExportXlsx: activity.showExportXlsx ?? true,
+      showCommentUi: activity.showCommentUi ?? true,
+      showQuestionUi: activity.showQuestionUi ?? true,
+      showVoteCountToJudge: activity.showVoteCountToJudge ?? false,
+    });
   });
   activityDialog.value = true;
 }
@@ -833,6 +845,11 @@ function openCloneActivity(activity: Activity) {
     startTime: activity.startTime ? formatBJ(activity.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
     endTime: activity.endTime ? formatBJ(activity.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
     isPublicVisible: false,
+    showExportZip: activity.showExportZip ?? true,
+    showExportXlsx: activity.showExportXlsx ?? true,
+    showCommentUi: activity.showCommentUi ?? true,
+    showQuestionUi: activity.showQuestionUi ?? true,
+    showVoteCountToJudge: activity.showVoteCountToJudge ?? false,
   });
   activityDialog.value = true;
 }
@@ -925,6 +942,7 @@ async function changeCurrentActivity(nextActivityId: string) {
     dashboardActivityId.value = nextActivityId;
     localStorage.setItem(ADMIN_DASHBOARD_ACTIVITY_KEY, nextActivityId);
     await auth.fetchMe();
+    sync.fetchSiteTitle();
     await fetchAll();
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.message || "切换活动失败，请稍后重试");
@@ -1103,7 +1121,39 @@ async function createActivity() {
     ElMessage.success(isEditing ? "活动已更新" : isCloning ? "活动已复制" : "活动已创建");
     await fetchAll();
   } catch (err: any) {
-    ElMessage.error(err?.response?.data?.message || "操作失败，请检查活动编码是否重复");
+    const message = err?.response?.data?.message || "操作失败，请检查活动编码是否重复";
+    if (err?.response?.status === 409 && message.includes("切换活动类型")) {
+      try {
+        await ElMessageBox.confirm(message, "警告", {
+          confirmButtonText: "确认切换（数据将清除）",
+          cancelButtonText: "取消",
+          type: "warning",
+          distinguishCancelAndClose: true,
+        });
+      } catch {
+        return;
+      }
+      try {
+        const confirmPayload = { ...payload, __confirmTypeSwitch: true };
+        const confirmRequest = isEditing
+          ? api.put(`/api/admin/activities/${editingActivityId.value}`, confirmPayload)
+          : isCloning
+            ? api.post(`/api/admin/activities/${cloningSourceActivityId.value}/clone`, confirmPayload)
+            : api.post("/api/admin/activities", confirmPayload);
+        const response = await confirmRequest;
+        if (!isEditing && response?.data?.id) {
+          selectedActivityId.value = response.data.id;
+        }
+        activityDialog.value = false;
+        resetActivityForm();
+        ElMessage.success(isEditing ? "活动已更新" : isCloning ? "活动已复制" : "活动已创建");
+        await fetchAll();
+      } catch (retryErr: any) {
+        ElMessage.error(retryErr?.response?.data?.message || "操作失败");
+      }
+      return;
+    }
+    ElMessage.error(message);
   }
 }
 
@@ -1301,6 +1351,7 @@ async function saveActivitySettings() {
     showExportXlsx: activitySettingsForm.showExportXlsx,
     showCommentUi: activitySettingsForm.showCommentUi,
     showQuestionUi: activitySettingsForm.showQuestionUi,
+    showVoteCountToJudge: activitySettingsForm.showVoteCountToJudge,
   });
   ElMessage.success("活动评分配置已更新");
   await fetchAll();
@@ -1840,6 +1891,16 @@ watch(
   },
 );
 
+watch([section, isVotingMode], () => {
+  if (section.value === 'templates' && isVotingMode.value) {
+    router.replace('/admin/dashboard');
+  }
+});
+
+watch(selectedActivityId, () => {
+  void auth.fetchMe();
+});
+
 onMounted(() => {
   syncResponsiveState();
   syncResultsBackTopVisibility();
@@ -1861,6 +1922,7 @@ onUnmounted(() => {
     mode="admin"
     title="统一评分管理台"
     subtitle="紧凑布局、底部 Dock 导航、实时同步数据、统一毛玻璃风格"
+    :voting-mode="isVotingMode"
   >
     <template #extra>
       <el-button class="topbar-action-button topbar-password-button" plain @click="openPasswordDialog">
@@ -2406,6 +2468,15 @@ onUnmounted(() => {
     </template>
 
     <template v-else-if="section === 'templates'">
+      <template v-if="isVotingMode">
+        <section class="glass-panel" style="padding: 48px 20px; text-align: center;">
+          <div style="font-size: 36px; opacity: 0.25; margin-bottom: 12px">📋</div>
+          <div style="font-size: 16px; font-weight: 500; margin-bottom: 8px">投票模式不需要评分模板</div>
+          <div class="muted" style="margin-bottom: 16px">投票模式下评委直接对学生投票，无需设置评分标准和模板。</div>
+          <el-button type="primary" @click="router.push('/admin/results')">查看投票结果</el-button>
+        </section>
+      </template>
+      <template v-else>
       <section class="glass-panel" style="padding: 12px; margin-bottom: 10px">
         <div class="panel-header">
           <div>
@@ -2571,6 +2642,7 @@ onUnmounted(() => {
           </div>
         </div>
       </section>
+      </template>
     </template>
 
     <template v-else-if="section === 'results'">
@@ -2584,7 +2656,8 @@ onUnmounted(() => {
               <span class="results-toolbar-hint">支持姓名、分组的首字母和全拼搜索</span>
             </div>
           </div>
-          <el-button type="primary" @click="downloadFile(`/api/admin/activities/${activityId}/export/results`, 'results.xlsx')">导出 Excel</el-button>
+          <el-button v-if="isVotingMode" type="primary" @click="downloadFile(`/api/admin/activities/${activityId}/export/results`, 'voting-results.xlsx')">导出投票结果</el-button>
+          <el-button v-else type="primary" @click="downloadFile(`/api/admin/activities/${activityId}/export/results`, 'results.xlsx')">导出 Excel</el-button>
         </div>
         <div class="results-toolbar">
           <el-input
@@ -2615,7 +2688,7 @@ onUnmounted(() => {
               />
             </el-select>
           </div>
-          <div class="results-filter-field">
+          <div v-if="!isVotingMode" class="results-filter-field">
             <el-select v-model="resultScoreFilter" placeholder="分数">
               <el-option
                 v-for="item in resultScoreOptions"
@@ -2630,6 +2703,7 @@ onUnmounted(() => {
         <div ref="resultsScrollRef" class="admin-results-scroll" @scroll="handleResultsScroll">
           <template v-if="paginatedResults.length">
             <div class="results-card-grid">
+              <template v-if="!isVotingMode">
               <div v-for="row in paginatedResults" :key="row.id" class="glass-panel" :style="[{ padding: '16px', borderRadius: '8px', position: 'relative', overflow: 'hidden' }, getScoreColorStyle(row.summary?.finalScore)]">
                 <div style="position: relative; z-index: 1;">
                   <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
@@ -2659,14 +2733,43 @@ onUnmounted(() => {
                     <span>评分进度</span>
                     <span>{{ row.summary?.submittedJudgeCount ?? 0 }} / {{ row.summary?.requiredJudgeCount ?? 0 }} 评委</span>
                   </div>
-                  <el-progress 
-                    :percentage="getResultProgressPercentage(row)" 
-                    :show-text="false" 
+                  <el-progress
+                    :percentage="getResultProgressPercentage(row)"
+                    :show-text="false"
                     :status="row.summary?.isComplete ? 'success' : (row.summary?.finalScore != null && row.summary?.finalScore < 60 ? 'exception' : '')"
                     style="margin-top: 6px;"
                   />
                 </div>
               </div>
+              </template>
+              <template v-else>
+              <div v-for="row in paginatedResults" :key="row.id" class="glass-panel" style="padding: 16px; border-radius: 8px; position: relative; overflow: hidden;">
+                <div style="position: relative; z-index: 1;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                    <div>
+                      <div style="font-size: 18px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: baseline;">
+                        <span style="color: var(--el-color-primary); font-style: italic; margin-right: 8px; font-size: 24px; font-weight: 900;">#{{ row.rankNo }}</span>
+                        {{ row.name }} <span style="font-size: 14px; font-weight: normal; color: var(--el-text-color-regular); margin-left: 6px;">({{ row.studentNo }})</span>
+                      </div>
+                      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <el-tag size="small">{{ row.group?.name }}</el-tag>
+                        <el-tag size="small" type="info">{{ row.className || "班级未知" }}</el-tag>
+                      </div>
+                    </div>
+                  </div>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: rgba(255,255,255,0.4); backdrop-filter: blur(4px); padding: 12px; border-radius: 6px;">
+                    <div>
+                      <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px;">得票数</div>
+                      <div style="font-size: 22px; font-weight: 600; color: var(--el-color-primary);">{{ row.voteCount ?? 0 }}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px;">投票评委</div>
+                      <div style="font-size: 13px; color: var(--el-text-color-regular); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="row.votedJudgeNames">{{ row.votedJudgeNames || "-" }}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              </template>
             </div>
           </template>
           <el-empty v-else :description="resultEmptyDescription" />
@@ -2753,7 +2856,14 @@ onUnmounted(() => {
       <el-form label-position="top">
         <el-form-item label="活动名称"><el-input v-model="activityForm.name" /></el-form-item>
         <el-form-item label="活动编码"><el-input v-model="activityForm.code" /></el-form-item>
-        <el-form-item label="活动类型"><el-input v-model="activityForm.type" /></el-form-item>
+        <el-form-item label="活动类型">
+          <el-select v-model="activityForm.type" placeholder="选择活动类型">
+            <el-option label="微格教学" value="微格教学" />
+            <el-option label="教学评价" value="教学评价" />
+            <el-option label="面试评分" value="面试评分" />
+            <el-option label="投票" value="投票" />
+          </el-select>
+        </el-form-item>
         <div class="compact-grid cols-2">
           <el-form-item label="开放开始时间">
             <el-date-picker
@@ -2791,6 +2901,16 @@ onUnmounted(() => {
           <div style="display: flex; flex-direction: column; gap: 8px">
             <el-switch v-model="activityForm.showCommentUi" active-text="显示评语相关 UI" />
             <el-switch v-model="activityForm.showQuestionUi" active-text="显示提问相关 UI" />
+          </div>
+        </el-form-item>
+        <el-form-item v-if="activityForm.type === '投票'" label="投票模式设置">
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <el-switch v-model="activityForm.showVoteCountToJudge" />
+              <el-tag :type="activityForm.showVoteCountToJudge ? 'success' : 'info'" size="small">
+                {{ activityForm.showVoteCountToJudge ? '已开启：评委可查看学生得票数' : '未开启：评委无法查看得票数' }}
+              </el-tag>
+            </div>
           </div>
         </el-form-item>
         <el-form-item label="说明"><el-input v-model="activityForm.description" type="textarea" /></el-form-item>

@@ -102,6 +102,7 @@ const lockReason = computed(() => {
   return "";
 });
 const avgDecimalPlaces = computed(() => Number(currentActivity.value?.activity?.avgDecimalPlaces ?? 2));
+const isVotingMode = computed(() => currentActivity.value?.activity?.type === "投票");
 const showExportZip = computed(() => currentActivity.value?.activity?.showExportZip !== false);
 const showExportXlsx = computed(() => currentActivity.value?.activity?.showExportXlsx !== false);
 const showCommentUi = computed(() => currentActivity.value?.activity?.showCommentUi !== false);
@@ -271,38 +272,72 @@ async function openScore(student: Student) {
 
 async function resetScore(student: Student) {
   if (resettingStudentId.value) return;
+  if (isLocked.value) {
+    ElMessage.warning(lockReason.value + "，只读");
+    return;
+  }
+  const message = isVotingMode.value
+    ? `确定撤回对「${student.name}」的投票吗？`
+    : `确定将「${student.name}」的评分重置为未评分状态吗？此操作不可撤销。`;
+  const title = isVotingMode.value ? "撤回投票" : "重置评分";
+  const confirmText = isVotingMode.value ? "确定撤回" : "确定重置";
   try {
-    await ElMessageBox.confirm(
-      `确定将「${student.name}」的评分重置为未评分状态吗？此操作不可撤销。`,
-      "重置评分",
-      { confirmButtonText: "确定重置", cancelButtonText: "取消", type: "warning" },
-    );
+    await ElMessageBox.confirm(message, title, { confirmButtonText: confirmText, cancelButtonText: "取消", type: "warning" });
   } catch {
     return;
   }
   resettingStudentId.value = student.id;
   try {
-    await api.delete(`/api/judge/activities/${activityId.value}/students/${student.id}/reset-score`);
-    // Locally clear the row state
-    students.value = students.value.map((s) =>
-      s.id === student.id ? { ...s, myScoreStatus: null, scores: [] } as typeof s : s,
-    );
-    const tmpl = template.value;
-    rowForms[student.id] = {
-      totalScore: 0,
-      comment: "",
-      details: tmpl?.items?.reduce<Record<string, number>>((acc, item) => { acc[item.id] = 0; return acc; }, {}) || {},
-    };
-    savedRowSignatures[student.id] = buildRowSignature(student.id);
-    ElMessage.success("已重置为未评分");
-    // Refresh progress counter in background
+    if (isVotingMode.value) {
+      await api.delete(`/api/judge/activities/${activityId.value}/students/${student.id}/vote`);
+      students.value = students.value.map((s) =>
+        s.id === student.id ? { ...s, myVoted: false, myScoreStatus: null, scores: [] } as typeof s : s,
+      );
+      ElMessage.success("已撤回投票");
+    } else {
+      await api.delete(`/api/judge/activities/${activityId.value}/students/${student.id}/reset-score`);
+      students.value = students.value.map((s) =>
+        s.id === student.id ? { ...s, myScoreStatus: null, scores: [] } as typeof s : s,
+      );
+      const tmpl = template.value;
+      rowForms[student.id] = {
+        totalScore: 0,
+        comment: "",
+        details: tmpl?.items?.reduce<Record<string, number>>((acc, item) => { acc[item.id] = 0; return acc; }, {}) || {},
+      };
+      savedRowSignatures[student.id] = buildRowSignature(student.id);
+      ElMessage.success("已重置为未评分");
+    }
     void api.get(`/api/judge/activities/${activityId.value}/progress`).then(({ data: prog }) => {
       progress.value = prog;
     }).catch(() => {/* silent */});
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || "重置失败，请稍后重试");
+    ElMessage.error(error?.response?.data?.message || "操作失败，请稍后重试");
   } finally {
     resettingStudentId.value = null;
+  }
+}
+
+async function castVote(student: Student) {
+  if (isLocked.value) {
+    ElMessage.warning(lockReason.value + "，只读");
+    return;
+  }
+  if (scoreOpening.value) return;
+  scoreOpening.value = true;
+  try {
+    await api.post(`/api/judge/activities/${activityId.value}/students/${student.id}/vote`, {});
+    students.value = students.value.map((s) =>
+      s.id === student.id ? { ...s, myVoted: true, myScoreStatus: "SUBMITTED" as const } : s,
+    );
+    void api.get(`/api/judge/activities/${activityId.value}/progress`).then(({ data: prog }) => {
+      progress.value = prog;
+    }).catch(() => {/* silent */});
+    ElMessage.success(`已为「${student.name}」投票`);
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || "投票失败");
+  } finally {
+    scoreOpening.value = false;
   }
 }
 
@@ -311,50 +346,58 @@ async function batchReset() {
     ElMessage.warning(lockReason.value + "，只读");
     return;
   }
-  const targetStudents = filteredStudents.value.filter((student) => student.myScoreStatus !== null);
+  const targetStudents = isVotingMode.value
+    ? filteredStudents.value.filter((student) => student.myVoted)
+    : filteredStudents.value.filter((student) => student.myScoreStatus !== null);
   if (targetStudents.length === 0) {
-    ElMessage.info("当前没有可重置的评分");
+    ElMessage.info(isVotingMode.value ? "当前没有可撤回的投票" : "当前没有可重置的评分");
     return;
   }
   try {
-    await ElMessageBox.confirm(
-      `确定将过滤后 ${targetStudents.length} 个学生的评分全部重置为未评分状态？此操作不可撤销。`,
-      "批量重置评分",
-      { confirmButtonText: "确定重置", cancelButtonText: "取消", type: "warning" },
-    );
+    const msg = isVotingMode.value
+      ? `确定撤回过滤后 ${targetStudents.length} 个学生的投票？`
+      : `确定将过滤后 ${targetStudents.length} 个学生的评分全部重置为未评分状态？此操作不可撤销。`;
+    await ElMessageBox.confirm(msg, isVotingMode.value ? "批量撤回投票" : "批量重置评分", { confirmButtonText: "确定", cancelButtonText: "取消", type: "warning" });
   } catch {
     return;
   }
   batchLoading.value = "reset-score";
   try {
-    const { data } = await api.delete(`/api/judge/activities/${activityId.value}/batch-reset-score`, {
-      data: { studentIds: targetStudents.map((s) => s.id) },
-    });
-
-    // Locally update affected rows
-    const resultMap = new Map<string, any>();
-    for (const r of data.results ?? []) {
-      resultMap.set(r.studentId, r);
+    if (isVotingMode.value) {
+      for (const student of targetStudents) {
+        await api.delete(`/api/judge/activities/${activityId.value}/students/${student.id}/vote`).catch(() => {/* silent */});
+      }
+      students.value = students.value.map((s) => {
+        if (!targetStudents.find((t) => t.id === s.id)) return s;
+        return { ...s, myVoted: false, myScoreStatus: null, scores: [] } as typeof s;
+      });
+      ElMessage.success(`已批量撤回 ${targetStudents.length} 个学生的投票`);
+    } else {
+      const { data } = await api.delete(`/api/judge/activities/${activityId.value}/batch-reset-score`, {
+        data: { studentIds: targetStudents.map((s) => s.id) },
+      });
+      const resultMap = new Map<string, any>();
+      for (const r of data.results ?? []) {
+        resultMap.set(r.studentId, r);
+      }
+      students.value = students.value.map((student) => {
+        if (!resultMap.has(student.id)) return student;
+        const r = resultMap.get(student.id);
+        const updated = { ...student, myScoreStatus: null, scores: [] } as typeof student;
+        if (r?.summary) updated.summary = r.summary;
+        return updated;
+      });
+      for (const student of targetStudents) {
+        const tmpl = template.value;
+        rowForms[student.id] = {
+          totalScore: 0,
+          comment: "",
+          details: tmpl?.items?.reduce<Record<string, number>>((acc, item) => { acc[item.id] = 0; return acc; }, {}) || {},
+        };
+        savedRowSignatures[student.id] = buildRowSignature(student.id);
+      }
+      ElMessage.success(`已批量重置 ${targetStudents.length} 个学生的评分`);
     }
-    students.value = students.value.map((student) => {
-      if (!resultMap.has(student.id)) return student;
-      const r = resultMap.get(student.id);
-      const updated = { ...student, myScoreStatus: null, scores: [] } as typeof student;
-      if (r?.summary) updated.summary = r.summary;
-      return updated;
-    });
-    // Reset rowForms and signatures for affected students
-    for (const student of targetStudents) {
-      const tmpl = template.value;
-      rowForms[student.id] = {
-        totalScore: 0,
-        comment: "",
-        details: tmpl?.items?.reduce<Record<string, number>>((acc, item) => { acc[item.id] = 0; return acc; }, {}) || {},
-      };
-      savedRowSignatures[student.id] = buildRowSignature(student.id);
-    }
-
-    ElMessage.success(`已批量重置 ${targetStudents.length} 个学生的评分`);
 
     // Refresh progress counter in background
     void api.get(`/api/judge/activities/${activityId.value}/progress`).then(({ data: prog }) => {
@@ -809,6 +852,21 @@ onBeforeRouteUpdate(async () => {
 
     <template v-if="section === 'home'">
       <section class="stats-row home-block">
+        <template v-if="isVotingMode">
+          <div class="glass-panel stat-card">
+            <div class="muted">总人数</div>
+            <div class="stat-value">{{ progress.total }}</div>
+          </div>
+          <div class="glass-panel stat-card">
+            <div class="muted">已投票</div>
+            <div class="stat-value">{{ progress.submitted }}</div>
+          </div>
+          <div class="glass-panel stat-card">
+            <div class="muted">待投票</div>
+            <div class="stat-value">{{ progress.pending }}</div>
+          </div>
+        </template>
+        <template v-else>
         <div class="glass-panel stat-card">
           <div class="muted">总人数</div>
           <div class="stat-value">{{ progress.total }}</div>
@@ -825,6 +883,7 @@ onBeforeRouteUpdate(async () => {
           <div class="muted">待评分</div>
           <div class="stat-value">{{ progress.pending }}</div>
         </div>
+        </template>
       </section>
 
       <section class="glass-panel entity-card home-block">
@@ -842,15 +901,20 @@ onBeforeRouteUpdate(async () => {
             <div class="judge-activity-name">{{ currentActivity?.activity?.name || "未绑定活动" }}</div>
             <div class="judge-activity-meta">
               <span>当前分组：{{ currentActivity?.group?.name || "未分组" }}</span>
-              <span>待评分：{{ progress.pending }}</span>
+              <span>{{ isVotingMode ? '待投票' : '待评分' }}：{{ progress.pending }}</span>
               <span v-if="currentActivity?.customRole">
                 角色：<el-tag :color="currentActivity.customRole.color || '#409eff'" style="color: #fff; border: none">{{ currentActivity.customRole.name }}</el-tag>
               </span>
             </div>
           </div>
           <div class="judge-activity-actions">
-            <el-button type="primary" plain :icon="User" @click="router.push('/judge/students')">现场评分</el-button>
-            <el-button type="primary" :icon="EditPen" @click="router.push('/judge/score')">表格评分</el-button>
+            <template v-if="isVotingMode">
+              <el-button type="primary" :icon="User" @click="router.push('/judge/voting')">去投票</el-button>
+            </template>
+            <template v-else>
+              <el-button type="primary" plain :icon="User" @click="router.push('/judge/students')">现场评分</el-button>
+              <el-button type="primary" :icon="EditPen" @click="router.push('/judge/score')">表格评分</el-button>
+            </template>
           </div>
         </div>
       </section>
@@ -888,78 +952,115 @@ onBeforeRouteUpdate(async () => {
         </div>
           <div class="card-list">
             <div v-for="student in filteredStudents" :key="student.id" class="glass-panel entity-card judge-student-card">
-            <div class="panel-header">
-              <div class="student-card-name-row">
-                <span class="student-order-badge">#{{ student.orderNo }}</span>
-                <div>
-                  <h4 style="margin: 0">{{ student.name }}</h4>
-                  <div class="muted">{{ student.studentNo }} · {{ student.className }}</div>
+              <template v-if="isVotingMode">
+                <div class="panel-header">
+                  <div class="student-card-name-row">
+                    <span class="student-order-badge">#{{ student.orderNo }}</span>
+                    <div>
+                      <h4 style="margin: 0">{{ student.name }}</h4>
+                      <div class="muted">{{ student.studentNo }} · {{ student.className }}</div>
+                    </div>
+                  </div>
+                  <div class="tag-row">
+                    <el-tag
+                      v-if="student.customRole"
+                      round
+                      :style="student.customRole.color ? `background:${student.customRole.color};border-color:${student.customRole.color};color:#fff` : ''"
+                    >
+                      {{ student.customRole.name }}
+                    </el-tag>
+                    <el-tag v-if="student.myVoted" type="success">已投票</el-tag>
+                    <el-tag v-else type="info">未投票</el-tag>
+                    <el-tag v-if="currentActivity?.activity?.showVoteCountToJudge" round>得票 {{ student.summary?.submittedJudgeCount ?? 0 }}</el-tag>
+                  </div>
+                </div>
+                <div v-if="student.myVoted" style="display: flex; gap: 8px; margin-top: 8px">
+                  <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
+                </div>
+                <el-button v-else :disabled="isLocked" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+              </template>
+              <template v-else>
+              <div class="panel-header">
+                <div class="student-card-name-row">
+                  <span class="student-order-badge">#{{ student.orderNo }}</span>
+                  <div>
+                    <h4 style="margin: 0">{{ student.name }}</h4>
+                    <div class="muted">{{ student.studentNo }} · {{ student.className }}</div>
+                  </div>
+                </div>
+                <div class="tag-row">
+                  <el-tag
+                    v-if="student.customRole"
+                    round
+                    :style="student.customRole.color ? `background:${student.customRole.color};border-color:${student.customRole.color};color:#fff` : ''"
+                  >
+                    {{ student.customRole.name }}
+                  </el-tag>
+                  <template v-if="rowIsDirty(student)">
+                    <el-tag type="danger" style="margin-right: 4px;">待保存</el-tag>
+                    <el-tag type="warning">待提交</el-tag>
+                  </template>
+                  <el-tag v-else-if="student.myScoreStatus === 'SUBMITTED'" type="success">已提交</el-tag>
+                  <el-tag v-else-if="student.myScoreStatus === 'DRAFT'" type="warning">待提交</el-tag>
+                  <el-tag round>均分 {{ formatAvgScore(student.summary?.avgScore) }}</el-tag>
                 </div>
               </div>
-              <div class="tag-row">
-                <el-tag
-                  v-if="student.customRole"
-                  round
-                  :style="student.customRole.color ? `background:${student.customRole.color};border-color:${student.customRole.color};color:#fff` : ''"
+              <div style="margin-bottom: 12px">
+                <el-button
+                  size="small"
+                  plain
+                  :loading="peerScoreOpening"
+                  class="peer-count-btn"
+                  @click="openPeerScores(student)"
                 >
-                  {{ student.customRole.name }}
-                </el-tag>
-                <template v-if="rowIsDirty(student)">
-                  <el-tag type="danger" style="margin-right: 4px;">待保存</el-tag>
-                  <el-tag type="warning">待提交</el-tag>
-                </template>
-                <el-tag v-else-if="student.myScoreStatus === 'SUBMITTED'" type="success">已提交</el-tag>
-                <el-tag v-else-if="student.myScoreStatus === 'DRAFT'" type="warning">待提交</el-tag>
-                <el-tag round>均分 {{ formatAvgScore(student.summary?.avgScore) }}</el-tag>
+                  {{ student.summary?.submittedJudgeCount }}/{{ student.summary?.requiredJudgeCount }} 已完成
+                </el-button>
               </div>
-            </div>
-            <div style="margin-bottom: 12px">
               <el-button
-                size="small"
-                plain
-                :loading="peerScoreOpening"
-                class="peer-count-btn"
-                @click="openPeerScores(student)"
-              >
-                {{ student.summary?.submittedJudgeCount }}/{{ student.summary?.requiredJudgeCount }} 已完成
-              </el-button>
-            </div>
-            <el-button
-              v-if="!student.myScoreStatus"
-              :disabled="isLocked"
-              :loading="scoreOpening"
-              class="go-score-btn"
-              style="width: 100%"
-              @click="openScore(student)"
-            >
-              去评分
-            </el-button>
-            <div v-else style="display: flex; gap: 8px">
-              <el-button
-                :type="student.myScoreStatus === 'SUBMITTED' ? 'success' : 'primary'"
+                v-if="!student.myScoreStatus"
                 :disabled="isLocked"
                 :loading="scoreOpening"
-                style="flex: 1"
+                class="go-score-btn"
+                style="width: 100%"
                 @click="openScore(student)"
               >
-                修改评分
+                去评分
               </el-button>
-              <el-button
-                type="danger"
-                plain
-                :disabled="isLocked"
-                :loading="resettingStudentId === student.id"
-                @click="resetScore(student)"
-              >
-                重置
-              </el-button>
+              <div v-else style="display: flex; gap: 8px">
+                <el-button
+                  :type="student.myScoreStatus === 'SUBMITTED' ? 'success' : 'primary'"
+                  :disabled="isLocked"
+                  :loading="scoreOpening"
+                  style="flex: 1"
+                  @click="openScore(student)"
+                >
+                  修改评分
+                </el-button>
+                <el-button
+                  type="danger"
+                  plain
+                  :disabled="isLocked"
+                  :loading="resettingStudentId === student.id"
+                  @click="resetScore(student)"
+                >
+                  重置
+                </el-button>
+              </div>
+              </template>
             </div>
           </div>
-        </div>
       </section>
     </template>
 
     <template v-else-if="section === 'score'">
+      <template v-if="isVotingMode">
+        <section class="glass-panel" style="padding: 24px; text-align: center;">
+          <el-empty description="投票模式下不支持表格评分">
+            <el-button type="primary" @click="router.push('/judge/voting')">去投票</el-button>
+          </el-empty>
+        </section>
+      </template>
+      <template v-else>
       <section class="glass-panel judge-toolbar-panel">
         <div class="judge-toolbar-shell">
           <div class="judge-toolbar-search-block">
@@ -1147,6 +1248,45 @@ onBeforeRouteUpdate(async () => {
         <div v-if="filteredStudents.length === 0" class="entity-card">
           <h4>没有匹配的学生</h4>
           <div class="muted">可以调整搜索条件，或去学生页查看完整状态。</div>
+        </div>
+      </section>
+      </template>
+    </template>
+
+    <template v-else-if="section === 'voting'">
+      <section class="glass-panel" style="padding: 12px">
+        <div class="panel-header">
+          <h3 style="margin: 0">投票</h3>
+          <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级/拼音" />
+        </div>
+        <div class="card-list">
+          <div v-for="student in filteredStudents" :key="student.id" class="glass-panel entity-card judge-student-card">
+            <div class="panel-header">
+              <div class="student-card-name-row">
+                <span class="student-order-badge">#{{ student.orderNo }}</span>
+                <div>
+                  <h4 style="margin: 0">{{ student.name }}</h4>
+                  <div class="muted">{{ student.studentNo }} · {{ student.className }}</div>
+                </div>
+              </div>
+              <div class="tag-row">
+                <el-tag
+                  v-if="student.customRole"
+                  round
+                  :style="student.customRole.color ? `background:${student.customRole.color};border-color:${student.customRole.color};color:#fff` : ''"
+                >
+                  {{ student.customRole.name }}
+                </el-tag>
+                <el-tag v-if="student.myVoted" type="success">已投票</el-tag>
+                <el-tag v-else type="info">未投票</el-tag>
+                <el-tag v-if="currentActivity?.activity?.showVoteCountToJudge" round>得票 {{ student.summary?.submittedJudgeCount ?? 0 }}</el-tag>
+              </div>
+            </div>
+            <div v-if="student.myVoted" style="display: flex; gap: 8px; margin-top: 8px">
+              <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
+            </div>
+            <el-button v-else :disabled="isLocked" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+          </div>
         </div>
       </section>
     </template>

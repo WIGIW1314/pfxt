@@ -24,6 +24,7 @@ const props = defineProps<{
   title: string;
   subtitle?: string;
   mode: "admin" | "judge" | "public";
+  votingMode?: boolean;
 }>();
 
 const auth = useAuthStore();
@@ -32,25 +33,43 @@ const router = useRouter();
 const route = useRoute();
 const logoUrl = "/api/assets/logo.svg";
 
-const adminItems = [
-  { label: "看板", path: "/admin/dashboard", icon: DataBoard },
-  { label: "活动", path: "/admin/activities", icon: Calendar },
-  { label: "分组", path: "/admin/groups", icon: Files },
-  { label: "学生", path: "/admin/students", icon: User },
-  { label: "评委", path: "/admin/judges", icon: Management },
-  { label: "角色", path: "/admin/roles", icon: UserFilled },
-  { label: "模板", path: "/admin/templates", icon: Notebook },
-  { label: "结果", path: "/admin/results", icon: Histogram },
-  { label: "日志", path: "/admin/logs", icon: Document },
-];
+const adminItems = computed(() => {
+  const base = [
+    { label: "看板", path: "/admin/dashboard", icon: DataBoard },
+    { label: "活动", path: "/admin/activities", icon: Calendar },
+    { label: "分组", path: "/admin/groups", icon: Files },
+    { label: "学生", path: "/admin/students", icon: User },
+    { label: "评委", path: "/admin/judges", icon: Management },
+    { label: "角色", path: "/admin/roles", icon: UserFilled },
+  ];
+  if (!props.votingMode) {
+    base.push({ label: "模板", path: "/admin/templates", icon: Notebook });
+  }
+  base.push(
+    { label: "结果", path: "/admin/results", icon: Histogram },
+    { label: "日志", path: "/admin/logs", icon: Document },
+  );
+  return base;
+});
 
-const judgeItems = [
-  { label: "主页", path: "/judge/home", icon: DataBoard },
-  { label: "现场评分", path: "/judge/students", icon: User },
-  { label: "表格评分", path: "/judge/score", icon: Operation },
-  { label: "公告", path: "/judge/announcement", icon: ChatLineSquare },
-  { label: "我的", path: "/judge/profile", icon: Management },
-];
+const judgeItems = computed(() => {
+  const isVoting = (auth.currentActivityRole as any)?.activity?.type === "投票";
+  if (isVoting) {
+    return [
+      { label: "主页", path: "/judge/home", icon: DataBoard },
+      { label: "去投票", path: "/judge/voting", icon: User },
+      { label: "公告", path: "/judge/announcement", icon: ChatLineSquare },
+      { label: "我的", path: "/judge/profile", icon: Management },
+    ];
+  }
+  return [
+    { label: "主页", path: "/judge/home", icon: DataBoard },
+    { label: "现场评分", path: "/judge/students", icon: User },
+    { label: "表格评分", path: "/judge/score", icon: Operation },
+    { label: "公告", path: "/judge/announcement", icon: ChatLineSquare },
+    { label: "我的", path: "/judge/profile", icon: Management },
+  ];
+});
 
 const publicItems = [
   { label: "分组信息", path: "/public/groups", icon: Files },
@@ -60,8 +79,8 @@ const publicItems = [
 ];
 
 const items = computed(() => {
-  if (props.mode === "admin") return adminItems;
-  if (props.mode === "judge") return judgeItems;
+  if (props.mode === "admin") return adminItems.value;
+  if (props.mode === "judge") return judgeItems.value;
   return publicItems;
 });
 const welcomeText = computed(() =>
