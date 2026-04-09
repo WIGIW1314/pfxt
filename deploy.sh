@@ -18,8 +18,12 @@ APP_NAME="${APP_NAME:-pfxt_wghappy_cn}"
 BACKUP_DB="${BACKUP_DB:-1}"
 RUN_DB_PUSH="${RUN_DB_PUSH:-0}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
+# GitHub 镜像加速前缀，例如：https://ghfast.top 或 https://mirror.ghproxy.com
+# 留空则直接访问 GitHub
+GIT_MIRROR="${GIT_MIRROR:-}"
 NPM_INSTALL_CMD="${NPM_INSTALL_CMD:-npm ci}"
 USE_PM2="${USE_PM2:-1}"
+PM2_STARTUP="${PM2_STARTUP:-1}"
 RESTART_CMD="${RESTART_CMD:-}"
 ENV_FILE="$ROOT_DIR/server/.env"
 
@@ -74,8 +78,20 @@ if [[ "$SKIP_GIT_PULL" != "1" ]]; then
 
   current_branch="$(git rev-parse --abbrev-ref HEAD)"
   log "拉取最新代码（分支：$current_branch）"
-  git fetch --all --prune
-  git pull --ff-only origin "$current_branch"
+
+  if [[ -n "$GIT_MIRROR" ]]; then
+    remote_url="$(git remote get-url origin)"
+    # 提取 owner/repo 部分
+    repo_path="${remote_url#*github.com[:/]}"
+    repo_path="${repo_path%.git}"
+    mirror_full="${GIT_MIRROR%/}/https://github.com/${repo_path}"
+    log "使用 GitHub 镜像：$mirror_full"
+    git fetch "$mirror_full" "$current_branch"
+    git pull --ff-only "$mirror_full" "$current_branch"
+  else
+    git fetch --all --prune
+    git pull --ff-only origin "$current_branch"
+  fi
 fi
 
 db_file="$(resolve_db_path)"
@@ -106,6 +122,17 @@ elif [[ -x "$RESTART_SCRIPT" ]]; then
   "$RESTART_SCRIPT"
 elif [[ "$USE_PM2" == "1" ]]; then
   require_cmd pm2
+  # 确保 PM2 开机自启已配置
+  if [[ "$PM2_STARTUP" == "1" ]]; then
+    if ! pm2 startup 2>/dev/null | grep -q "already has been setup"; then
+      log "检测到 PM2 未配置开机自启，正在配置..."
+      startup_output="$(pm2 startup 2>&1 || true)"
+      if echo "$startup_output" | grep -q "sudo"; then
+        log "⚠️  PM2 startup 需要 sudo 权限，请手动执行以下命令："
+        echo "$startup_output" | grep "sudo"
+      fi
+    fi
+  fi
   if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
     log "重载 PM2 应用：$APP_NAME"
     pm2 reload ecosystem.config.cjs --only "$APP_NAME" --update-env
