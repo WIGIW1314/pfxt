@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { nextTick, onBeforeUnmount, ref } from "vue";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -16,23 +16,69 @@ const errorMsg = ref("");
 const switching = ref(false);
 const uploading = ref(false);
 const flashing = ref(false);
-const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
 let stream: MediaStream | null = null;
 let facingMode: "environment" | "user" = "environment";
-const cameraDialogFullscreen = computed(() => {
-  if (typeof window === "undefined") return viewportWidth.value <= 768;
-  return viewportWidth.value <= 1024 || window.matchMedia("(pointer: coarse)").matches;
-});
-
-function syncViewportWidth() {
-  if (typeof window === "undefined") return;
-  viewportWidth.value = window.innerWidth;
-}
 
 function buildVideoConstraints(mode: "environment" | "user"): MediaTrackConstraints {
   return {
     facingMode: { ideal: mode },
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
   };
+}
+
+function scoreCameraLabel(label: string, mode: "environment" | "user") {
+  const text = label.toLowerCase();
+  let score = 0;
+  if (mode === "environment") {
+    if (/(back|rear|environment|后置|后摄)/.test(text)) score += 60;
+    if (/(main|wide|广角|主摄|标准)/.test(text)) score += 20;
+    if (/(tele|zoom|长焦)/.test(text)) score -= 40;
+    if (/(front|user|前置|前摄)/.test(text)) score -= 80;
+  } else {
+    if (/(front|user|前置|前摄)/.test(text)) score += 60;
+    if (/(back|rear|environment|后置|后摄)/.test(text)) score -= 80;
+  }
+  return score;
+}
+
+async function openPreferredCamera(mode: "environment" | "user") {
+  const initial = await navigator.mediaDevices.getUserMedia({
+    video: buildVideoConstraints(mode),
+    audio: false,
+  });
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices.filter((item) => item.kind === "videoinput");
+  if (!cameras.length) {
+    return initial;
+  }
+
+  const best = [...cameras].sort((a, b) => scoreCameraLabel(b.label || "", mode) - scoreCameraLabel(a.label || "", mode))[0];
+  if (!best?.deviceId) {
+    return initial;
+  }
+
+  const currentTrack = initial.getVideoTracks()[0];
+  const currentDeviceId = (currentTrack?.getSettings?.().deviceId as string | undefined) || "";
+  if (best.deviceId === currentDeviceId) {
+    return initial;
+  }
+
+  try {
+    const exact = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: { exact: best.deviceId },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+    initial.getTracks().forEach((t) => t.stop());
+    return exact;
+  } catch {
+    return initial;
+  }
 }
 
 function getErrorMessage(name: string | undefined, msg?: string): string {
@@ -71,11 +117,7 @@ async function openCamera() {
   }
 
   try {
-    const constraints: MediaStreamConstraints = {
-      video: buildVideoConstraints(facingMode),
-      audio: false,
-    };
-    stream = await navigator.mediaDevices.getUserMedia(constraints);
+    stream = await openPreferredCamera(facingMode);
     await bindStreamToVideo(stream);
   } catch (err: any) {
     const name = err?.name;
@@ -85,10 +127,7 @@ async function openCamera() {
     if (isOverconstrained && facingMode === "environment") {
       facingMode = "user";
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: buildVideoConstraints(facingMode),
-          audio: false,
-        });
+        stream = await openPreferredCamera(facingMode);
         await bindStreamToVideo(stream);
         return;
       } catch (retryErr: any) {
@@ -111,7 +150,7 @@ async function bindStreamToVideo(activeStream: MediaStream) {
     try {
       const caps = track.getCapabilities();
       if (caps?.zoom && typeof caps.zoom.min === "number" && typeof caps.zoom.max === "number") {
-        const targetZoom = Math.min(caps.zoom.max, Math.max(caps.zoom.min, 1));
+        const targetZoom = caps.zoom.min <= 1 && caps.zoom.max >= 1 ? 1 : caps.zoom.min;
         await track.applyConstraints({ advanced: [{ zoom: targetZoom }] });
       }
     } catch {
@@ -189,28 +228,18 @@ function onDialogClose() {
 
 onBeforeUnmount(() => {
   stopCamera();
-  if (typeof window !== "undefined") {
-    window.removeEventListener("resize", syncViewportWidth);
-  }
-});
-
-onMounted(() => {
-  syncViewportWidth();
-  if (typeof window !== "undefined") {
-    window.addEventListener("resize", syncViewportWidth);
-  }
 });
 </script>
 
 <template>
   <el-dialog
     :model-value="modelValue"
-    width="min(920px, calc(100vw - 16px))"
-    :fullscreen="cameraDialogFullscreen"
+    width="100vw"
+    :fullscreen="true"
     :show-close="true"
     :close-on-click-modal="false"
     title="拍照上传"
-    :class="['camera-dialog', { 'camera-dialog-force-full': cameraDialogFullscreen }]"
+    class="camera-dialog camera-dialog-force-full"
     @open="onDialogOpen"
     @close="onDialogClose"
     @update:model-value="(v: boolean) => { if (!v) closeDialog(); }"
@@ -282,19 +311,20 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
 .camera-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   height: 100%;
   min-height: 0;
+  background: #000;
 }
 
 .camera-preview-wrap {
   position: relative;
   width: 100%;
   flex: 1;
-  min-height: 360px;
+  min-height: 0;
   height: auto;
   background: #000;
-  border-radius: 10px;
+  border-radius: 0;
   overflow: hidden;
 }
 
@@ -396,7 +426,7 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   text-align: center;
   padding: 0 24px;
   line-height: 1.6;
-  max-width: 88%;
+  max-width: 90%;
 }
 
 :deep(.camera-dialog.el-dialog.is-fullscreen) {
@@ -414,7 +444,7 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
 
 .camera-toolbar-overlay {
   position: absolute;
-  top: 10px;
+  top: calc(env(safe-area-inset-top) + 10px);
   right: 10px;
   z-index: 3;
 }
@@ -433,27 +463,32 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   max-width: 100vw !important;
   height: 100dvh !important;
   margin: 0 !important;
+  border-radius: 0 !important;
 }
 
 :deep(.camera-dialog-force-full.el-dialog .el-dialog__header) {
-  padding: 10px 14px 8px !important;
+  padding: 8px 12px 6px !important;
+  margin: 0 !important;
 }
 
 :deep(.camera-dialog-force-full.el-dialog .el-dialog__body) {
-  height: calc(100dvh - 56px);
-  padding: 8px !important;
+  height: calc(100dvh - 46px);
+  padding: 0 !important;
   overflow: hidden;
 }
 
 @media (max-width: 768px) {
   .camera-preview-wrap {
-    min-height: 0;
-    border-radius: 8px;
+    border-radius: 0;
   }
 
   .camera-placeholder {
     min-height: 0;
     flex: 1;
+  }
+
+  .camera-shutter-ring {
+    bottom: calc(env(safe-area-inset-bottom) + 16px);
   }
 }
 </style>
