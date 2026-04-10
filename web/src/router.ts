@@ -26,7 +26,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore();
-  if (!auth.initialized) {
+  if (!auth.initialized && !to.meta.public) {
     await auth.fetchMe();
   }
 
