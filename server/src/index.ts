@@ -101,6 +101,7 @@ const serverDir = path.basename(path.resolve(__dir, "..")) === "dist"
   ? path.resolve(__dir, "..", "..")
   : path.resolve(__dir, "..");
 const uploadsDir = path.resolve(serverDir, "uploads");
+const legacyUploadsDir = path.resolve(serverDir, "dist", "uploads");
 const logoPath = resolveExistingPath([
   process.env.LOGO_PATH ? path.resolve(process.env.LOGO_PATH) : undefined,
   privateAssetsDir ? path.resolve(privateAssetsDir, "logo.svg") : undefined,
@@ -112,6 +113,13 @@ const logoPath = resolveExistingPath([
   path.resolve(serverDir, "../web/public/logo.svg"),
 ]);
 if (!fsSync.existsSync(uploadsDir)) fsSync.mkdirSync(uploadsDir, { recursive: true });
+if (legacyUploadsDir !== uploadsDir && fsSync.existsSync(legacyUploadsDir)) {
+  try {
+    fsSync.cpSync(legacyUploadsDir, uploadsDir, { recursive: true, force: false, errorOnExist: false });
+  } catch (error) {
+    console.warn("[WARN] legacy uploads migration failed:", error);
+  }
+}
 await app.register(fastifyStatic, {
   root: uploadsDir,
   prefix: "/api/uploads/",

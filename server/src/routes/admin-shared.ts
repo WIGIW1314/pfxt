@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 import { prisma } from "../db.js";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
-// admin-shared.ts is always at {src,dist}/routes/, so go up 2 levels to reach server root
-const serverDir = path.resolve(__dir, "..", "..");
+const maybeServerDir = path.resolve(__dir, "..", "..");
+const serverDir = path.basename(maybeServerDir) === "dist"
+  ? path.resolve(maybeServerDir, "..")
+  : maybeServerDir;
 
 export const uploadsDir = path.resolve(serverDir, "uploads");
 if (!fsSync.existsSync(uploadsDir)) fsSync.mkdirSync(uploadsDir, { recursive: true });
