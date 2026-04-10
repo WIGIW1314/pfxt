@@ -21,6 +21,9 @@ SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
 # GitHub 镜像加速前缀，例如：https://ghfast.top 或 https://mirror.ghproxy.com
 # 留空则直接访问 GitHub
 GIT_MIRROR="${GIT_MIRROR:-}"
+# git pull 参数，默认使用 rebase + autostash，避免本地改动阻塞部署
+# 可按需覆盖，例如：GIT_PULL_OPTS="--ff-only"
+GIT_PULL_OPTS="${GIT_PULL_OPTS:---rebase --autostash}"
 NPM_INSTALL_CMD="${NPM_INSTALL_CMD:-npm ci}"
 USE_PM2="${USE_PM2:-1}"
 PM2_STARTUP="${PM2_STARTUP:-1}"
@@ -70,6 +73,7 @@ cd "$ROOT_DIR"
 
 if [[ "$SKIP_GIT_PULL" != "1" ]]; then
   require_cmd git
+  read -r -a git_pull_opts <<< "$GIT_PULL_OPTS"
 
   if [[ ! -d .git ]]; then
     echo "当前目录不是 Git 仓库，无法执行 git pull。"
@@ -77,7 +81,7 @@ if [[ "$SKIP_GIT_PULL" != "1" ]]; then
   fi
 
   current_branch="$(git rev-parse --abbrev-ref HEAD)"
-  log "拉取最新代码（分支：$current_branch）"
+  log "拉取最新代码（分支：$current_branch，参数：$GIT_PULL_OPTS）"
 
   if [[ -n "$GIT_MIRROR" ]]; then
     remote_url="$(git remote get-url origin)"
@@ -87,10 +91,10 @@ if [[ "$SKIP_GIT_PULL" != "1" ]]; then
     mirror_full="${GIT_MIRROR%/}/https://github.com/${repo_path}"
     log "使用 GitHub 镜像：$mirror_full"
     git fetch "$mirror_full" "$current_branch"
-    git pull --ff-only "$mirror_full" "$current_branch"
+    git pull "${git_pull_opts[@]}" "$mirror_full" "$current_branch"
   else
     git fetch --all --prune
-    git pull --ff-only origin "$current_branch"
+    git pull "${git_pull_opts[@]}" origin "$current_branch"
   fi
 fi
 
