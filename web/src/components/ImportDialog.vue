@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { UploadFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
@@ -22,8 +22,27 @@ const emit = defineEmits<{
 
 const file = ref<File | null>(null);
 const uploading = ref(false);
-const fullscreen = computed(() => window.innerWidth < 768);
+const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
+const fullscreen = computed(() => viewportWidth.value < 768);
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+function syncViewportWidth() {
+  if (typeof window === "undefined") return;
+  viewportWidth.value = window.innerWidth;
+}
+
+onMounted(() => {
+  syncViewportWidth();
+  if (typeof window !== "undefined") {
+    window.addEventListener("resize", syncViewportWidth);
+  }
+});
+
+onUnmounted(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", syncViewportWidth);
+  }
+});
 
 useModalHistory(
   () => props.modelValue,

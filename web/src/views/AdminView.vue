@@ -167,6 +167,7 @@ function getOnlineUserCardStyle(user: OnlineUser) {
 
 const loading = ref(false);
 const dialogSubmitting = ref(false);
+const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
 
 async function withDialogSubmit(fn: () => Promise<void>) {
   if (dialogSubmitting.value) return;
@@ -177,7 +178,7 @@ async function withDialogSubmit(fn: () => Promise<void>) {
     dialogSubmitting.value = false;
   }
 }
-const mobileDialog = computed(() => window.innerWidth < 768);
+const mobileDialog = computed(() => viewportWidth.value < 768);
 const isCompactResultPagination = ref(typeof window !== "undefined" ? window.innerWidth <= 560 : false);
 const resultCurrentPage = ref(1);
 const resultPageSize = ref(24);
@@ -258,7 +259,8 @@ watch([results, resultKeyword, resultGroupFilter, resultStatusFilter, resultScor
 
 function syncResponsiveState() {
   if (typeof window === "undefined") return;
-  isCompactResultPagination.value = window.innerWidth <= 560;
+  viewportWidth.value = window.innerWidth;
+  isCompactResultPagination.value = viewportWidth.value <= 560;
 }
 
 function syncResultsBackTopVisibility() {
@@ -2956,7 +2958,7 @@ onUnmounted(() => {
     <el-dialog v-model="announcementDialog" class="mobile-dialog" :fullscreen="mobileDialog" title="编辑活动公告" width="860px">
       <el-tabs v-model="announcementTab" class="announcement-tabs">
         <el-tab-pane label="学生公告" name="student">
-          <el-form label-position="top">
+          <el-form label-position="top" @submit.prevent>
             <el-form-item label="公告内容（HTML 富文本）">
               <RichEditor v-model="announcementContent" />
             </el-form-item>
@@ -2991,7 +2993,7 @@ onUnmounted(() => {
         </el-tab-pane>
 
         <el-tab-pane label="评委公告" name="judge">
-          <el-form label-position="top">
+          <el-form label-position="top" @submit.prevent>
             <el-form-item label="公告内容（HTML 富文本）">
               <RichEditor v-model="judgeAnnouncementContent" />
             </el-form-item>

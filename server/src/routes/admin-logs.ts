@@ -39,9 +39,10 @@ export function registerAdminLogsRoutes(app: FastifyInstance) {
   /* ---------- 编辑日志 ---------- */
   app.put("/api/admin/logs/:id", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     await requireAdmin(request);
+    const logId = (request.params as { id: string }).id;
     const body = request.body as Record<string, unknown>;
     const log = await prisma.operationLog.update({
-      where: { id: request.params as unknown as string },
+      where: { id: logId },
       data: {
         module: body.module ? String(body.module) : undefined,
         action: body.action ? String(body.action) : undefined,
@@ -57,7 +58,8 @@ export function registerAdminLogsRoutes(app: FastifyInstance) {
   /* ---------- 删除日志 ---------- */
   app.delete("/api/admin/logs/:id", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     await requireAdmin(request);
-    await prisma.operationLog.delete({ where: { id: request.params as unknown as string } });
+    const logId = (request.params as { id: string }).id;
+    await prisma.operationLog.delete({ where: { id: logId } });
     return { success: true };
   });
 }

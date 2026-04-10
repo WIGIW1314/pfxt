@@ -769,14 +769,24 @@ async function getEffectiveTemplate(activityId: string, requestedTemplateId?: st
   return { activity, template: selectedTemplate };
 }
 
-async function ensureJudgeAccess(activityId: string, studentId: string, userId: string) {
+async function ensureJudgeAccess(
+  activityId: string,
+  studentId: string,
+  userId: string,
+  options?: { autoCreateAssignment?: boolean },
+) {
+  const autoCreateAssignment = options?.autoCreateAssignment !== false;
   const student = await prisma.student.findUniqueOrThrow({
     where: { id: studentId },
     select: {
       id: true,
+      activityId: true,
       groupId: true,
     },
   });
+  if (student.activityId !== activityId) {
+    throw createHttpError("你没有该学生的评分权限", 403);
+  }
 
   let assignment = await prisma.scoreAssignment.findUnique({
     where: {
@@ -802,7 +812,11 @@ async function ensureJudgeAccess(activityId: string, studentId: string, userId: 
   });
 
   if (!binding) {
-    throw new Error("你没有该学生的评分权限");
+    throw createHttpError("你没有该学生的评分权限", 403);
+  }
+
+  if (!autoCreateAssignment) {
+    return { student, assignment: null };
   }
 
   assignment = await prisma.scoreAssignment.create({
@@ -819,8 +833,8 @@ async function ensureJudgeAccess(activityId: string, studentId: string, userId: 
 }
 
 async function getAnonymousPeerScores(activityId: string, studentId: string, currentUserId: string) {
-  const student = await prisma.student.findUniqueOrThrow({
-    where: { id: studentId },
+  const student = await prisma.student.findFirstOrThrow({
+    where: { id: studentId, activityId },
     select: { groupId: true },
   });
   const [bindings, scores] = await Promise.all([
@@ -1869,6 +1883,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
   app.get("/api/judge/activities/:activityId/students/:studentId", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    await ensureJudgeAccess(activityId, studentId, request.user.userId, { autoCreateAssignment: false });
     const [student, peerScores] = await Promise.all([
       prisma.student.findFirstOrThrow({
         where: { id: studentId, activityId },

@@ -46,12 +46,24 @@ export default defineConfig({
             return "tiptap";
           }
 
+          if (id.includes("pdfjs-dist")) {
+            return "pdfjs";
+          }
+
           if (id.includes("docx-preview")) {
             return "docx-preview";
           }
 
+          if (id.includes("@element-plus/icons-vue")) {
+            return "element-plus-icons";
+          }
+
           if (id.includes("element-plus")) {
-            return "element-plus";
+            const componentMatch = id.match(/element-plus[\\/]+es[\\/]+components[\\/]+([^\\/]+)/);
+            if (componentMatch?.[1]) {
+              return `element-plus-${componentMatch[1]}`;
+            }
+            return "element-plus-core";
           }
 
           if (
@@ -61,6 +73,18 @@ export default defineConfig({
             || id.includes("\\vue\\")
           ) {
             return "vue-vendor";
+          }
+
+          if (id.includes("dayjs")) {
+            return "dayjs";
+          }
+
+          if (id.includes("axios")) {
+            return "axios";
+          }
+
+          if (id.includes("pinyin-pro")) {
+            return "pinyin-pro";
           }
 
           return "vendor";

@@ -39,10 +39,18 @@ function resolveExistingPath(candidates: Array<string | undefined>) {
 }
 
 app.setErrorHandler((error, _request, reply) => {
-  const message = error instanceof Error ? error.message : "请求失败";
-  const statusCode = typeof (error as { statusCode?: number })?.statusCode === "number"
+  const rawStatusCode = typeof (error as { statusCode?: number })?.statusCode === "number"
     ? (error as { statusCode: number }).statusCode
-    : 400;
+    : 500;
+  const statusCode = rawStatusCode >= 400 && rawStatusCode < 600 ? rawStatusCode : 500;
+  if (statusCode >= 500) {
+    console.error("[ERROR]", error);
+  }
+  const message = statusCode >= 500
+    ? "服务器内部错误"
+    : error instanceof Error
+      ? error.message
+      : "请求失败";
   reply.code(statusCode).send({ message });
 });
 

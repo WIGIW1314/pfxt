@@ -40,10 +40,15 @@
     min-height: 44px;
   }
 
-  /* 复选框保持正方形，同时满足44px触摸区域 */
+  /* 复选框在移动端使用固定正方形尺寸，避免被拉伸 */
+  .el-checkbox__input {
+    width: 18px;
+    height: 18px;
+  }
+
   .el-checkbox__inner {
-    min-width: 18px;
-    min-height: 18px;
+    width: 18px !important;
+    height: 18px !important;
   }
 }
 

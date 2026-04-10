@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import bcrypt from "bcryptjs";
-import { ScoreStatus, UserRole } from "@prisma/client";
+import { Prisma, ScoreStatus, UserRole } from "@prisma/client";
 import { prisma } from "../db.js";
 import type { AuthRequest } from "../types.js";
 import { broadcast } from "../websocket.js";
@@ -21,6 +21,21 @@ async function assertTemplateUnused(templateId: string) {
   const scoreCount = await prisma.score.count({ where: { templateId } });
   if (scoreCount > 0) {
     throw createHttpError("该模板已被评分记录使用，不能修改或删除", 409);
+  }
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+) {
+  if (items.length === 0) return;
+  const batchSize = Math.max(1, limit);
+  let index = 0;
+  while (index < items.length) {
+    const batch = items.slice(index, index + batchSize);
+    index += batchSize;
+    await Promise.all(batch.map((item) => worker(item)));
   }
 }
 
@@ -215,19 +230,29 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
       },
     });
 
-    await prisma.scoreAssignment.deleteMany({
-      where: {
-        activityId: currentRelation.activityId,
-        judgeUserId: currentRelation.userId,
-      },
-    });
+    const previousJudgeScope = currentRelation.role === UserRole.JUDGE
+      ? `${currentRelation.activityId}:${currentRelation.groupId || ""}`
+      : null;
+    const nextJudgeScope = updatedRelation.role === UserRole.JUDGE
+      ? `${updatedRelation.activityId}:${updatedRelation.groupId || ""}`
+      : null;
+    const judgeScopeChanged = previousJudgeScope !== nextJudgeScope;
 
-    await prisma.score.deleteMany({
-      where: {
-        activityId: currentRelation.activityId,
-        judgeUserId: currentRelation.userId,
-      },
-    });
+    if (judgeScopeChanged && previousJudgeScope) {
+      await prisma.scoreAssignment.deleteMany({
+        where: {
+          activityId: currentRelation.activityId,
+          judgeUserId: currentRelation.userId,
+        },
+      });
+
+      await prisma.score.deleteMany({
+        where: {
+          activityId: currentRelation.activityId,
+          judgeUserId: currentRelation.userId,
+        },
+      });
+    }
 
     if (updatedRelation.role === UserRole.JUDGE && updatedRelation.groupId) {
       const students = await prisma.student.findMany({
@@ -302,40 +327,60 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
     const customRoles = await prisma.activityCustomRole.findMany({ where: { activityId } });
     const customRoleMap = new Map(customRoles.map((r) => [r.name, r]));
 
-    for (const row of rows) {
-      const username = String(row[1] ?? "").trim();
-      const realName = String(row[0] ?? "").trim();
-      if (!username) continue;
-      const passwordHash = await bcrypt.hash(String(row[2] ?? "123456"), 10);
-      let user = await prisma.user.findUnique({ where: { username } });
+    const normalizedRows = rows
+      .map((row) => ({
+        username: String(row[1] ?? "").trim(),
+        realName: String(row[0] ?? "").trim(),
+        password: String(row[2] ?? "123456"),
+        group: groupMap.get(String(row[3] ?? "")),
+        customRole: (() => {
+          const customRoleName = String(row[4] ?? "").trim();
+          return customRoleName ? customRoleMap.get(customRoleName) : undefined;
+        })(),
+        sortOrderRaw: row[5],
+      }))
+      .filter((row) => Boolean(row.username));
+
+    const dedupedRows = Array.from(
+      new Map(normalizedRows.map((row) => [row.username, row])).values(),
+    );
+
+    await runWithConcurrency(dedupedRows, 6, async (row) => {
+      let user = await prisma.user.findUnique({ where: { username: row.username } });
       if (!user) {
-        user = await prisma.user.create({
-          data: {
-            username,
-            realName,
-            passwordHash,
-            role: UserRole.JUDGE,
-            forceChangePassword: true,
-          },
-        });
+        const passwordHash = await bcrypt.hash(row.password, 10);
+        try {
+          user = await prisma.user.create({
+            data: {
+              username: row.username,
+              realName: row.realName || row.username,
+              passwordHash,
+              role: UserRole.JUDGE,
+              forceChangePassword: true,
+            },
+          });
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+            user = await prisma.user.findUnique({ where: { username: row.username } });
+          } else {
+            throw error;
+          }
+        }
+      }
+      if (!user) {
+        throw createHttpError(`导入评委失败：无法创建或获取用户 ${row.username}`, 500);
       }
 
-      const group = groupMap.get(String(row[3] ?? ""));
-      const customRoleName = String(row[4] ?? "").trim();
-      const customRole = customRoleName ? customRoleMap.get(customRoleName) : undefined;
-      const sortOrderRaw = row[5];
-      const sortOrder = sortOrderRaw !== undefined && sortOrderRaw !== "" ? Number(sortOrderRaw) : 0;
-
+      const sortOrder = row.sortOrderRaw !== undefined && row.sortOrderRaw !== "" ? Number(row.sortOrderRaw) : 0;
       const existingRole = await prisma.activityUserRole.findFirst({
         where: { activityId, userId: user.id },
       });
+
       if (existingRole) {
         const updateData: Record<string, unknown> = {};
-        if (group && existingRole.groupId !== group.id) updateData.groupId = group.id;
-        if (customRole) updateData.customRoleId = customRole.id;
-        if (group && existingRole.groupId !== group.id) updateData.groupId = group.id;
-        if (customRole) updateData.customRoleId = customRole.id;
-        if (sortOrderRaw !== undefined && sortOrderRaw !== "") updateData.sortOrder = sortOrder;
+        if (row.group && existingRole.groupId !== row.group.id) updateData.groupId = row.group.id;
+        if (row.customRole) updateData.customRoleId = row.customRole.id;
+        if (row.sortOrderRaw !== undefined && row.sortOrderRaw !== "") updateData.sortOrder = sortOrder;
         if (Object.keys(updateData).length) {
           await prisma.activityUserRole.update({
             where: { id: existingRole.id },
@@ -348,16 +393,16 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
             activityId,
             userId: user.id,
             role: UserRole.JUDGE,
-            groupId: group?.id,
-            customRoleId: customRole?.id || null,
+            groupId: row.group?.id,
+            customRoleId: row.customRole?.id || null,
             isPrimary: true,
             sortOrder,
           },
         });
       }
 
-      if (group) {
-        const students = await prisma.student.findMany({ where: { activityId, groupId: group.id } });
+      if (row.group) {
+        const students = await prisma.student.findMany({ where: { activityId, groupId: row.group.id } });
         if (students.length) {
           const existing = await prisma.scoreAssignment.findMany({
             where: { activityId, judgeUserId: user.id },
@@ -370,17 +415,17 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
               activityId,
               studentId: student.id,
               judgeUserId: user.id,
-              groupId: group.id,
+              groupId: row.group!.id,
             }));
           if (newData.length) {
             await prisma.scoreAssignment.createMany({ data: newData });
           }
         }
       }
-    }
+    });
 
     broadcast("judge.updated", { activityId });
-    return { success: true, count: rows.length };
+    return { success: true, count: dedupedRows.length };
   });
 
   app.post("/api/admin/users/:id/reset-password", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {

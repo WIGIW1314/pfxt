@@ -59,16 +59,11 @@ function resolveSqlitePath() {
   return path.resolve(serverDir, filePath);
 }
 
-export const prisma = new PrismaClient();
-
-// --- SQLite performance: WAL mode + busy_timeout ---
-void prisma.$executeRawUnsafe(`PRAGMA journal_mode=WAL;`).catch(() => {});
-void prisma.$executeRawUnsafe(`PRAGMA busy_timeout=5000;`).catch(() => {});
-void prisma.$executeRawUnsafe(`PRAGMA synchronous=NORMAL;`).catch(() => {});
+const basePrisma = new PrismaClient();
 
 // --- Slow query logging ---
 const SLOW_QUERY_THRESHOLD = 100; // ms
-prisma.$extends({
+export const prisma = basePrisma.$extends({
   name: "slow-query-log",
   query: {
     async $allOperations({ operation, model, args, query }) {
@@ -82,6 +77,11 @@ prisma.$extends({
     },
   },
 });
+
+// --- SQLite performance: WAL mode + busy_timeout ---
+void prisma.$executeRawUnsafe(`PRAGMA journal_mode=WAL;`).catch(() => {});
+void prisma.$executeRawUnsafe(`PRAGMA busy_timeout=5000;`).catch(() => {});
+void prisma.$executeRawUnsafe(`PRAGMA synchronous=NORMAL;`).catch(() => {});
 
 export async function ensureRuntimeSchema() {
   const sqlitePath = resolveSqlitePath();

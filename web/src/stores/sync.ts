@@ -100,7 +100,9 @@ export const useSyncStore = defineStore("sync", () => {
     });
     // Cookie (httpOnly) is sent automatically by the browser
     socket = new WebSocket(`${wsBase}/ws?${params.toString()}`);
-    reconnectAttempts = 0; // Reset backoff on successful connection attempt
+    socket.onopen = () => {
+      reconnectAttempts = 0; // Reset backoff only after a successful connection
+    };
     pingPresence();
     if (heartbeatTimer) {
       window.clearInterval(heartbeatTimer);

@@ -9,31 +9,55 @@ export function registerAdminDashboardRoutes(app: FastifyInstance) {
   app.get("/api/admin/activities/:id/dashboard", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     await requireAdmin(request);
     const activityId = (request.params as { id: string }).id;
-    const onlineSnapshot = await getOnlineSnapshot();
-    const [groups, students, judges, submittedScores] = await Promise.all([
-      prisma.group.findMany({ where: { activityId } }),
-      prisma.student.findMany({ where: { activityId } }),
-      prisma.activityUserRole.findMany({ where: { activityId, role: UserRole.JUDGE } }),
-      prisma.score.findMany({ where: { activityId, status: ScoreStatus.SUBMITTED } }),
+    const [onlineSnapshot, groups, students, judgeCount, scoreCount] = await Promise.all([
+      getOnlineSnapshot(),
+      prisma.group.findMany({
+        where: { activityId },
+        select: {
+          id: true,
+          name: true,
+        },
+      }),
+      prisma.student.findMany({
+        where: { activityId },
+        select: {
+          id: true,
+          groupId: true,
+        },
+      }),
+      prisma.activityUserRole.count({ where: { activityId, role: UserRole.JUDGE } }),
+      prisma.score.count({ where: { activityId, status: ScoreStatus.SUBMITTED } }),
     ]);
     const summaryMap = await getStudentSummaryMap(activityId, students.map((student) => student.id));
+    const studentsByGroup = new Map<string, string[]>();
+    for (const student of students) {
+      const list = studentsByGroup.get(student.groupId) || [];
+      list.push(student.id);
+      studentsByGroup.set(student.groupId, list);
+    }
 
     const groupStats = groups.map((group) => {
-      const groupStudents = students.filter((student) => student.groupId === group.id);
-      const completed = groupStudents
-        .map((student) => summaryMap.get(student.id))
-        .filter((item) => Boolean(item));
+      const groupStudentIds = studentsByGroup.get(group.id) || [];
+      let completedCount = 0;
+      let hasSubmittedCount = 0;
+
+      for (const studentId of groupStudentIds) {
+        const summary = summaryMap.get(studentId);
+        if (!summary) continue;
+        if (summary.isComplete) completedCount++;
+        if (summary.submittedJudgeCount > 0) hasSubmittedCount++;
+      }
 
       return {
         groupId: group.id,
         groupName: group.name,
-        studentCount: groupStudents.length,
-        completedCount: completed.filter((item) => item?.isComplete).length,
-        progress: groupStudents.length === 0
+        studentCount: groupStudentIds.length,
+        completedCount,
+        progress: groupStudentIds.length === 0
           ? 0
           : Number(
               (
-                completed.filter((item) => item && item.submittedJudgeCount > 0).length / groupStudents.length
+                hasSubmittedCount / groupStudentIds.length
               ).toFixed(2),
             ),
       };
@@ -44,14 +68,14 @@ export function registerAdminDashboardRoutes(app: FastifyInstance) {
       activityCount: 1,
       groupCount: groups.length,
       studentCount: students.length,
-      judgeCount: judges.length,
+      judgeCount,
       onlineUserCount: onlineSnapshot.total,
       onlineJudgeCount: onlineSnapshot.judges,
       onlineAdminCount: onlineSnapshot.admins,
       onlineSecretaryCount: onlineSnapshot.secretaries,
       onlineUsers: onlineSnapshot.users,
       completedStudentCount: groupStats.reduce((sum, item) => sum + item.completedCount, 0),
-      scoreCount: submittedScores.length,
+      scoreCount,
       groupStats,
     };
   });

@@ -24,14 +24,23 @@ setInterval(() => {
 function checkLoginRate(ip: string) {
   const now = Date.now();
   const record = loginAttempts.get(ip);
-  if (record && now < record.resetAt) {
-    if (record.count >= LOGIN_MAX_ATTEMPTS) {
-      throw createHttpError("登录尝试过于频繁，请5分钟后再试", 429);
-    }
-    record.count++;
-  } else {
-    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+  if (record && now < record.resetAt && record.count >= LOGIN_MAX_ATTEMPTS) {
+    throw createHttpError("登录尝试过于频繁，请5分钟后再试", 429);
   }
+}
+
+function recordLoginFailure(ip: string) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (record && now < record.resetAt) {
+    record.count++;
+    return;
+  }
+  loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+}
+
+function clearLoginRate(ip: string) {
+  loginAttempts.delete(ip);
 }
 
 /**
@@ -72,13 +81,16 @@ export async function registerAuth(app: FastifyInstance) {
     const user = await prisma.user.findUnique({ where: { username: body.username } });
 
     if (!user || !user.isActive) {
+      recordLoginFailure(request.ip);
       return reply.code(401).send({ message: "账号不存在或已禁用" });
     }
 
     const matched = await bcrypt.compare(body.password, user.passwordHash);
     if (!matched) {
+      recordLoginFailure(request.ip);
       return reply.code(401).send({ message: "用户名或密码错误" });
     }
+    clearLoginRate(request.ip);
 
     await prisma.user.update({
       where: { id: user.id },

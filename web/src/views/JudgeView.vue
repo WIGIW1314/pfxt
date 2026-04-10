@@ -35,7 +35,8 @@ const resettingStudentId = ref<string | null>(null);
 const keyword = ref("");
 const rowForms = reactive<Record<string, { totalScore: number; comment: string; details: Record<string, number> }>>({});
 const savedRowSignatures = reactive<Record<string, string>>({});
-const compactScoreTable = computed(() => window.innerWidth < 768);
+const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
+const compactScoreTable = computed(() => viewportWidth.value < 768);
 const batchLoading = ref<"" | "save-draft" | "submit-score" | "reset-score">("");
 const rowCommentLoading = reactive<Record<string, boolean>>({});
 const pageLoading = ref(true);
@@ -46,6 +47,11 @@ const exportProgress = reactive({
   percent: 0,
 });
 let exportProgressTimer: number | undefined;
+
+function syncViewportWidth() {
+  if (typeof window === "undefined") return;
+  viewportWidth.value = window.innerWidth;
+}
 
 useModalHistory(
   () => peerScoreOpen.value,
@@ -842,6 +848,8 @@ onMounted(() => {
   void fetchJudgeData();
 });
 onMounted(() => {
+  syncViewportWidth();
+  window.addEventListener("resize", syncViewportWidth);
   window.addEventListener("beforeunload", handleBeforeUnload);
 });
 
@@ -854,6 +862,7 @@ function downloadQrcode(url: string, name: string) {
 
 onBeforeUnmount(() => {
   clearExportProgressTimer();
+  window.removeEventListener("resize", syncViewportWidth);
   window.removeEventListener("beforeunload", handleBeforeUnload);
 });
 

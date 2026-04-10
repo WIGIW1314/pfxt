@@ -45,6 +45,9 @@ export function usePerformance() {
   });
 
   const isSlowConnection = ref(false);
+  let collectTimer: number | null = null;
+  let settleTimer: number | null = null;
+  let visibilityHandler: (() => void) | null = null;
 
   function reportMetrics(data: VitalMetrics) {
     if (reported) return;
@@ -163,7 +166,10 @@ export function usePerformance() {
     metrics.value.timestamp = Date.now();
 
     // Wait a bit for LCP/CLS to settle (they can update after page load)
-    setTimeout(() => {
+    if (settleTimer != null) {
+      window.clearTimeout(settleTimer);
+    }
+    settleTimer = window.setTimeout(() => {
       // Fill in any nulls from PerformanceObserver limitations
       if (!metrics.value.ttfb) measureTTFB();
 
@@ -191,21 +197,35 @@ export function usePerformance() {
     measureTTFB();
 
     // Report when user leaves
-    document.addEventListener("visibilitychange", () => {
+    visibilityHandler = () => {
       if (document.visibilityState === "hidden") {
         collectAndReport();
       }
-    });
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
 
     // Also report on unload as fallback
     window.addEventListener("beforeunload", collectAndReport);
 
     // Initial report after load
-    setTimeout(collectAndReport, 5000);
+    collectTimer = window.setTimeout(collectAndReport, 5000);
   });
 
   onUnmounted(() => {
     observers.forEach((obs) => obs?.disconnect());
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
+    window.removeEventListener("beforeunload", collectAndReport);
+    if (collectTimer != null) {
+      window.clearTimeout(collectTimer);
+      collectTimer = null;
+    }
+    if (settleTimer != null) {
+      window.clearTimeout(settleTimer);
+      settleTimer = null;
+    }
   });
 
   return { metrics, isSlowConnection, reportMetrics: collectAndReport };

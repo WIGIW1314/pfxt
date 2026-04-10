@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -77,8 +77,15 @@ function applyLink() {
   linkInput.value = ''
 }
 function onLinkKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') applyLink()
-  if (e.key === 'Escape') { showLinkPopover.value = false; linkInput.value = '' }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    applyLink()
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    showLinkPopover.value = false
+    linkInput.value = ''
+  }
 }
 
 /* ---- image popover ---- */
@@ -97,8 +104,15 @@ function applyImage() {
   imageInput.value = ''
 }
 function onImageKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter') applyImage()
-  if (e.key === 'Escape') { showImagePopover.value = false; imageInput.value = '' }
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    applyImage()
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    showImagePopover.value = false
+    imageInput.value = ''
+  }
 }
 
 function insertTable() {
@@ -113,41 +127,41 @@ function insertTable() {
 
       <!-- text style -->
       <div class="toolbar-group">
-        <button :class="{ active: editor.isActive('bold') }" title="粗体 Ctrl+B" @click="editor.chain().focus().toggleBold().run()"><b>B</b></button>
-        <button :class="{ active: editor.isActive('italic') }" title="斜体 Ctrl+I" @click="editor.chain().focus().toggleItalic().run()"><i>I</i></button>
-        <button :class="{ active: editor.isActive('underline') }" title="下划线 Ctrl+U" @click="editor.chain().focus().toggleUnderline().run()"><u>U</u></button>
-        <button :class="{ active: editor.isActive('strike') }" title="删除线" @click="editor.chain().focus().toggleStrike().run()"><s>S</s></button>
+        <button type="button" :class="{ active: editor.isActive('bold') }" title="粗体 Ctrl+B" @click="editor.chain().focus().toggleBold().run()"><b>B</b></button>
+        <button type="button" :class="{ active: editor.isActive('italic') }" title="斜体 Ctrl+I" @click="editor.chain().focus().toggleItalic().run()"><i>I</i></button>
+        <button type="button" :class="{ active: editor.isActive('underline') }" title="下划线 Ctrl+U" @click="editor.chain().focus().toggleUnderline().run()"><u>U</u></button>
+        <button type="button" :class="{ active: editor.isActive('strike') }" title="删除线" @click="editor.chain().focus().toggleStrike().run()"><s>S</s></button>
       </div>
 
       <!-- headings -->
       <div class="toolbar-group">
-        <button :class="{ active: editor.isActive('heading', { level: 1 }) }" @click="editor.chain().focus().toggleHeading({ level: 1 }).run()">H1</button>
-        <button :class="{ active: editor.isActive('heading', { level: 2 }) }" @click="editor.chain().focus().toggleHeading({ level: 2 }).run()">H2</button>
-        <button :class="{ active: editor.isActive('heading', { level: 3 }) }" @click="editor.chain().focus().toggleHeading({ level: 3 }).run()">H3</button>
+        <button type="button" :class="{ active: editor.isActive('heading', { level: 1 }) }" @click="editor.chain().focus().toggleHeading({ level: 1 }).run()">H1</button>
+        <button type="button" :class="{ active: editor.isActive('heading', { level: 2 }) }" @click="editor.chain().focus().toggleHeading({ level: 2 }).run()">H2</button>
+        <button type="button" :class="{ active: editor.isActive('heading', { level: 3 }) }" @click="editor.chain().focus().toggleHeading({ level: 3 }).run()">H3</button>
       </div>
 
       <!-- alignment -->
       <div class="toolbar-group">
-        <button :class="{ active: editor.isActive({ textAlign: 'left' }) }" title="左对齐" @click="editor.chain().focus().setTextAlign('left').run()">
+        <button type="button" :class="{ active: editor.isActive({ textAlign: 'left' }) }" title="左对齐" @click="editor.chain().focus().setTextAlign('left').run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="2" rx="1" fill="currentColor"/><rect x="1" y="7" width="10" height="2" rx="1" fill="currentColor"/><rect x="1" y="12" width="12" height="2" rx="1" fill="currentColor"/></svg>
         </button>
-        <button :class="{ active: editor.isActive({ textAlign: 'center' }) }" title="居中" @click="editor.chain().focus().setTextAlign('center').run()">
+        <button type="button" :class="{ active: editor.isActive({ textAlign: 'center' }) }" title="居中" @click="editor.chain().focus().setTextAlign('center').run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="2" rx="1" fill="currentColor"/><rect x="3" y="7" width="10" height="2" rx="1" fill="currentColor"/><rect x="2" y="12" width="12" height="2" rx="1" fill="currentColor"/></svg>
         </button>
-        <button :class="{ active: editor.isActive({ textAlign: 'right' }) }" title="右对齐" @click="editor.chain().focus().setTextAlign('right').run()">
+        <button type="button" :class="{ active: editor.isActive({ textAlign: 'right' }) }" title="右对齐" @click="editor.chain().focus().setTextAlign('right').run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="2" rx="1" fill="currentColor"/><rect x="5" y="7" width="10" height="2" rx="1" fill="currentColor"/><rect x="3" y="12" width="12" height="2" rx="1" fill="currentColor"/></svg>
         </button>
       </div>
 
       <!-- lists -->
       <div class="toolbar-group">
-        <button :class="{ active: editor.isActive('bulletList') }" title="无序列表" @click="editor.chain().focus().toggleBulletList().run()">
+        <button type="button" :class="{ active: editor.isActive('bulletList') }" title="无序列表" @click="editor.chain().focus().toggleBulletList().run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><circle cx="2" cy="4" r="1.5" fill="currentColor"/><rect x="5" y="3" width="10" height="2" rx="1" fill="currentColor"/><circle cx="2" cy="8" r="1.5" fill="currentColor"/><rect x="5" y="7" width="10" height="2" rx="1" fill="currentColor"/><circle cx="2" cy="12" r="1.5" fill="currentColor"/><rect x="5" y="11" width="10" height="2" rx="1" fill="currentColor"/></svg>
         </button>
-        <button :class="{ active: editor.isActive('orderedList') }" title="有序列表" @click="editor.chain().focus().toggleOrderedList().run()">
+        <button type="button" :class="{ active: editor.isActive('orderedList') }" title="有序列表" @click="editor.chain().focus().toggleOrderedList().run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><text x="0" y="5" font-size="5" font-family="monospace" fill="currentColor">1.</text><rect x="5" y="3" width="10" height="2" rx="1" fill="currentColor"/><text x="0" y="10" font-size="5" font-family="monospace" fill="currentColor">2.</text><rect x="5" y="8" width="10" height="2" rx="1" fill="currentColor"/><text x="0" y="15" font-size="5" font-family="monospace" fill="currentColor">3.</text><rect x="5" y="13" width="10" height="2" rx="1" fill="currentColor"/></svg>
         </button>
-        <button :class="{ active: editor.isActive('blockquote') }" title="引用" @click="editor.chain().focus().toggleBlockquote().run()">
+        <button type="button" :class="{ active: editor.isActive('blockquote') }" title="引用" @click="editor.chain().focus().toggleBlockquote().run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1" y="2" width="3" height="12" rx="1.5" fill="var(--el-color-primary,#409eff)"/><rect x="6" y="4" width="9" height="2" rx="1" fill="currentColor"/><rect x="6" y="8" width="7" height="2" rx="1" fill="currentColor"/><rect x="6" y="12" width="8" height="2" rx="1" fill="currentColor"/></svg>
         </button>
       </div>
@@ -168,7 +182,7 @@ function insertTable() {
       <div class="toolbar-group" style="position:relative">
         <!-- link button + popover -->
         <div style="position:relative">
-          <button :class="{ active: editor.isActive('link') }" title="插入链接" @click="openLinkPopover">
+          <button type="button" :class="{ active: editor.isActive('link') }" title="插入链接" @click="openLinkPopover">
             <svg width="14" height="14" viewBox="0 0 16 16"><path d="M6.5 11.5l-1.5 1.5a3 3 0 01-4.24-4.24l3-3a3 3 0 014.1.12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M9.5 4.5l1.5-1.5a3 3 0 014.24 4.24l-3 3a3 3 0 01-4.1-.12" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M5.5 10.5l5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           </button>
           <div v-if="showLinkPopover" class="url-popover">
@@ -178,14 +192,14 @@ function insertTable() {
               placeholder="输入链接地址"
               @keydown="onLinkKeydown"
             />
-            <button class="url-popover-confirm" @click="applyLink">确认</button>
-            <button class="url-popover-cancel" @click="showLinkPopover = false">取消</button>
+            <button type="button" class="url-popover-confirm" @click="applyLink">确认</button>
+            <button type="button" class="url-popover-cancel" @click="showLinkPopover = false">取消</button>
           </div>
         </div>
 
         <!-- image button + popover -->
         <div style="position:relative">
-          <button title="插入图片" @click="openImagePopover">
+          <button type="button" title="插入图片" @click="openImagePopover">
             <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="5.5" cy="5.5" r="1.5" fill="currentColor"/><path d="M1.5 13l4-4 3 3 2-2 4 4" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div v-if="showImagePopover" class="url-popover">
@@ -195,25 +209,25 @@ function insertTable() {
               placeholder="输入图片 URL"
               @keydown="onImageKeydown"
             />
-            <button class="url-popover-confirm" @click="applyImage">确认</button>
-            <button class="url-popover-cancel" @click="showImagePopover = false">取消</button>
+            <button type="button" class="url-popover-confirm" @click="applyImage">确认</button>
+            <button type="button" class="url-popover-cancel" @click="showImagePopover = false">取消</button>
           </div>
         </div>
 
-        <button title="插入表格" @click="insertTable">
+        <button type="button" title="插入表格" @click="insertTable">
           <svg width="14" height="14" viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.3" fill="none"/><line x1="1" y1="6" x2="15" y2="6" stroke="currentColor" stroke-width="1.2"/><line x1="1" y1="11" x2="15" y2="11" stroke="currentColor" stroke-width="1.2"/><line x1="6" y1="1" x2="6" y2="15" stroke="currentColor" stroke-width="1.2"/><line x1="11" y1="1" x2="11" y2="15" stroke="currentColor" stroke-width="1.2"/></svg>
         </button>
-        <button title="分割线" @click="editor.chain().focus().setHorizontalRule().run()">
+        <button type="button" title="分割线" @click="editor.chain().focus().setHorizontalRule().run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><line x1="1" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
       </div>
 
       <!-- undo / redo -->
       <div class="toolbar-group">
-        <button title="撤销 Ctrl+Z" :disabled="!editor.can().undo()" @click="editor.chain().focus().undo().run()">
+        <button type="button" title="撤销 Ctrl+Z" :disabled="!editor.can().undo()" @click="editor.chain().focus().undo().run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 8a5 5 0 105 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><polyline points="1,5 3,8 6,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
         </button>
-        <button title="重做 Ctrl+Y" :disabled="!editor.can().redo()" @click="editor.chain().focus().redo().run()">
+        <button type="button" title="重做 Ctrl+Y" :disabled="!editor.can().redo()" @click="editor.chain().focus().redo().run()">
           <svg width="14" height="14" viewBox="0 0 16 16"><path d="M13 8a5 5 0 11-5 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><polyline points="15,5 13,8 10,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
         </button>
       </div>
@@ -416,6 +430,3 @@ function insertTable() {
   pointer-events: none;
 }
 </style>
-
-
-const props = defineProps<{

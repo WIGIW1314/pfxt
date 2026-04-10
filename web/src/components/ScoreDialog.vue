@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown } from "@element-plus/icons-vue";
 import { api } from "../api";
@@ -28,7 +28,8 @@ const form = reactive({
   details: {} as Record<string, number>,
 });
 
-const fullscreen = computed(() => window.innerWidth < 768);
+const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
+const fullscreen = computed(() => viewportWidth.value < 768);
 const isTotalOnly = computed(() => props.template?.scoreMode === "TOTAL" || !props.template?.items?.length);
 const quickTotal = ref<number | undefined>(undefined);
 const maxTotal = computed(() => props.template?.items.reduce((s, i) => s + i.maxScore, 0) ?? 0);
@@ -39,6 +40,24 @@ const scoreItemsOpen = ref(true);
 const aiQuestions = ref<string[]>([]);
 const closeGuardDisabled = ref(false);
 const saving = ref<"" | "save-draft" | "submit-score">("");
+
+function syncViewportWidth() {
+  if (typeof window === "undefined") return;
+  viewportWidth.value = window.innerWidth;
+}
+
+onMounted(() => {
+  syncViewportWidth();
+  if (typeof window !== "undefined") {
+    window.addEventListener("resize", syncViewportWidth);
+  }
+});
+
+onUnmounted(() => {
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", syncViewportWidth);
+  }
+});
 
 function buildFormSignature() {
   const detailSignature = isTotalOnly.value
