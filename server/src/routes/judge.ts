@@ -28,6 +28,7 @@ import { prisma } from "../db.js";
 import type { AuthRequest } from "../types.js";
 import { broadcast } from "../websocket.js";
 import { ensureActivityUnlocked, ensureGroupUnlocked, createHttpError, getCurrentJudgeActivity, getStudentSummary, getStudentSummaryMap, logOperation } from "../utils.js";
+import { resolveUploadPathFromUrl, uploadsDir } from "./admin-shared.js";
 
 const AI_ACCOUNT_ID = process.env.AI_ACCOUNT_ID?.trim() || "d393ec555236137e543d5c1555e4475e";
 const AI_API_TOKEN = process.env.API_TOKEN?.trim() || process.env.AI_API_TOKEN?.trim() || "";
@@ -205,6 +206,28 @@ const DOCX_TEMPLATE_PATH = resolveExistingPath(compactPaths([
   path.resolve(currentFileDir, "../../../../private/微格教学技能评价表.docx"),
   path.resolve(currentFileDir, "../../../../web/public/微格教学技能评价表.docx"),
 ]));
+
+const STUDENT_ARTWORK_MAX = 5;
+const STUDENT_ARTWORK_JUDGE_MAX = 3;
+const ARTWORK_ALLOWED_TYPES = new Set(["image/webp", "image/jpeg", "image/png", "image/jpg"]);
+const ARTWORK_MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+function normalizeArtworkFilename(activityId: string, studentId: string) {
+  const activityPart = String(activityId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "activity";
+  const studentPart = String(studentId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "student";
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `artwork_${activityPart}_${studentPart}_${Date.now()}_${randomPart}.webp`;
+}
+
+async function safeUnlinkArtworkByUrl(url?: string | null) {
+  const filePath = resolveUploadPathFromUrl(url);
+  if (!filePath) return;
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // ignore missing files
+  }
+}
 
 function normalizeAiComment(raw: string) {
   const compact = String(raw || "")
@@ -1804,6 +1827,16 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
       include: {
         group: true,
         customRole: true,
+        artworks: {
+          select: {
+            id: true,
+            url: true,
+            uploaderType: true,
+            uploadedById: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
+        },
         scores: {
           where: { judgeUserId: request.user.userId },
           include: { details: true },
@@ -1818,6 +1851,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
 
     return students.map((student) => ({
       ...student,
+      artworkCount: student.artworks.length,
+      canVote: votingMode ? student.artworks.length > 0 : true,
       myVoted: votingMode ? student.scores.some((s) => s.status === ScoreStatus.SUBMITTED) : undefined,
       myScoreStatus: student.scores[0]?.status ?? null,
       summary: summaryMap.get(student.id) || null,
@@ -1835,6 +1870,10 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     await ensureActivityUnlocked(activityId);
     const { student } = await ensureJudgeAccess(activityId, studentId, request.user.userId);
     await ensureGroupUnlocked(student.groupId);
+    const artworkCount = await prisma.studentArtwork.count({ where: { studentId } });
+    if (artworkCount <= 0) {
+      throw createHttpError("该学生暂无作品图，请先上传后再投票", 400);
+    }
 
     let votingTemplate = await prisma.scoreTemplate.findFirst({ where: { activityId, name: "投票评分表" } });
     if (!votingTemplate) {
@@ -1881,6 +1920,139 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     return { success: true };
   });
 
+  app.post("/api/judge/activities/:activityId/students/:studentId/artworks", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
+    const { activityId, studentId } = request.params as { activityId: string; studentId: string };
+    const activity = await prisma.activity.findUniqueOrThrow({
+      where: { id: activityId },
+      select: { type: true },
+    });
+    if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
+    await ensureActivityUnlocked(activityId);
+    const { student } = await ensureJudgeAccess(activityId, studentId, request.user.userId, { autoCreateAssignment: false });
+    await ensureGroupUnlocked(student.groupId);
+
+    const file = await request.file();
+    if (!file) throw createHttpError("未上传文件", 400);
+    if (!ARTWORK_ALLOWED_TYPES.has(file.mimetype.toLowerCase())) {
+      throw createHttpError("仅支持上传 JPG、PNG 或 WebP 图片", 400);
+    }
+    const fileBuffer = await file.toBuffer();
+    if (!fileBuffer.length) throw createHttpError("上传文件为空", 400);
+    if (fileBuffer.length > ARTWORK_MAX_FILE_SIZE) {
+      throw createHttpError("图片不能超过 5MB，请压缩后重试", 400);
+    }
+
+    const artworkDir = path.resolve(uploadsDir, "artworks");
+    await fs.mkdir(artworkDir, { recursive: true });
+    const filename = normalizeArtworkFilename(activityId, student.id);
+    const filePath = path.resolve(artworkDir, filename);
+    await fs.writeFile(filePath, fileBuffer);
+    const fileUrl = `/api/uploads/artworks/${filename}`;
+
+    try {
+      const artwork = await prisma.$transaction(async (tx) => {
+        const [totalCount, judgeCount] = await Promise.all([
+          tx.studentArtwork.count({ where: { studentId: student.id } }),
+          tx.studentArtwork.count({ where: { studentId: student.id, uploaderType: "JUDGE" } }),
+        ]);
+        if (totalCount >= STUDENT_ARTWORK_MAX) {
+          throw createHttpError(`每位学生最多上传 ${STUDENT_ARTWORK_MAX} 张作品图`, 400);
+        }
+        if (judgeCount >= STUDENT_ARTWORK_JUDGE_MAX) {
+          throw createHttpError(`评委最多为该学生上传 ${STUDENT_ARTWORK_JUDGE_MAX} 张作品图`, 400);
+        }
+
+        return tx.studentArtwork.create({
+          data: {
+            activityId,
+            studentId: student.id,
+            uploadedById: request.user.userId,
+            uploaderType: "JUDGE",
+            url: fileUrl,
+            fileName: file.filename || filename,
+            mimeType: file.mimetype,
+            fileSize: fileBuffer.length,
+          },
+          select: {
+            id: true,
+            url: true,
+            uploaderType: true,
+            uploadedById: true,
+            createdAt: true,
+          },
+        });
+      });
+
+      const artworkCount = await prisma.studentArtwork.count({ where: { studentId: student.id } });
+      broadcast("student.artwork.updated", { activityId, studentId: student.id });
+      await logOperation({
+        operatorId: request.user.userId,
+        operatorName: request.user.username,
+        module: "student",
+        action: "upload",
+        targetType: "artwork",
+        targetId: artwork.id,
+        afterData: {
+          studentId: student.id,
+          uploaderType: "JUDGE",
+          url: artwork.url,
+        },
+      });
+      return {
+        artwork,
+        artworkCount,
+        canVote: artworkCount > 0,
+      };
+    } catch (error) {
+      await safeUnlinkArtworkByUrl(fileUrl);
+      throw error;
+    }
+  });
+
+  app.delete("/api/judge/activities/:activityId/students/:studentId/artworks/:artworkId", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
+    const { activityId, studentId, artworkId } = request.params as { activityId: string; studentId: string; artworkId: string };
+    const activity = await prisma.activity.findUniqueOrThrow({
+      where: { id: activityId },
+      select: { type: true },
+    });
+    if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
+    await ensureActivityUnlocked(activityId);
+    const { student } = await ensureJudgeAccess(activityId, studentId, request.user.userId, { autoCreateAssignment: false });
+    await ensureGroupUnlocked(student.groupId);
+
+    const artwork = await prisma.studentArtwork.findFirst({
+      where: {
+        id: artworkId,
+        activityId,
+        studentId: student.id,
+      },
+    });
+    if (!artwork) throw createHttpError("作品图不存在或已被删除", 404);
+
+    await prisma.studentArtwork.delete({ where: { id: artwork.id } });
+    await safeUnlinkArtworkByUrl(artwork.url);
+    const artworkCount = await prisma.studentArtwork.count({ where: { studentId: student.id } });
+    broadcast("student.artwork.updated", { activityId, studentId: student.id });
+    await logOperation({
+      operatorId: request.user.userId,
+      operatorName: request.user.username,
+      module: "student",
+      action: "delete",
+      targetType: "artwork",
+      targetId: artwork.id,
+      beforeData: {
+        studentId: student.id,
+        uploaderType: artwork.uploaderType,
+        url: artwork.url,
+      },
+    });
+    return {
+      success: true,
+      artworkCount,
+      canVote: artworkCount > 0,
+    };
+  });
+
   app.get("/api/judge/activities/:activityId/students/:studentId", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
     await ensureJudgeAccess(activityId, studentId, request.user.userId, { autoCreateAssignment: false });
@@ -1890,6 +2062,16 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
         include: {
           group: true,
           activity: { include: { templates: { include: { items: { orderBy: { sortOrder: "asc" } } } } } },
+          artworks: {
+            select: {
+              id: true,
+              url: true,
+              uploaderType: true,
+              uploadedById: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+          },
           scores: {
             where: { judgeUserId: request.user.userId },
             include: { details: true },
@@ -1902,6 +2084,8 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     return {
       ...student,
       votingMode,
+      artworkCount: student.artworks.length,
+      canVote: votingMode ? student.artworks.length > 0 : true,
       peerScores: votingMode ? [] : peerScores,
       summary: await getStudentSummary(activityId, student.id),
     };

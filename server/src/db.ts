@@ -202,6 +202,33 @@ export async function ensureRuntimeSchema() {
   if (!studentColNames.has("customRoleId")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "Student" ADD COLUMN "customRoleId" TEXT;`);
   }
+  if (!studentColNames.has("workName")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Student" ADD COLUMN "workName" TEXT;`);
+  }
+
+  // StudentArtwork 表
+  const artworkTables = (await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='StudentArtwork';`,
+  )) || [];
+  if (artworkTables.length === 0) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "StudentArtwork" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "activityId" TEXT NOT NULL,
+        "studentId" TEXT NOT NULL,
+        "uploadedById" TEXT,
+        "uploaderType" TEXT NOT NULL,
+        "url" TEXT NOT NULL,
+        "fileName" TEXT NOT NULL,
+        "mimeType" TEXT NOT NULL,
+        "fileSize" INTEGER NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "StudentArtwork_activityId_fkey" FOREIGN KEY ("activityId") REFERENCES "Activity" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "StudentArtwork_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "StudentArtwork_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+      );
+    `);
+  }
 
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_group_activity_sort" ON "Group"("activityId", "sortOrder");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_activity_user_role_activity_role_group" ON "ActivityUserRole"("activityId", "role", "groupId");`);
@@ -215,6 +242,9 @@ export async function ensureRuntimeSchema() {
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_score_groupId" ON "Score"("groupId");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_score_templateId" ON "Score"("templateId");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_student_activityId" ON "Student"("activityId");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_student_artwork_student_created" ON "StudentArtwork"("studentId", "createdAt");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_student_artwork_activity_created" ON "StudentArtwork"("activityId", "createdAt");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_student_artwork_student_uploader_type" ON "StudentArtwork"("studentId", "uploaderType");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_group_activityId" ON "Group"("activityId");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_user_role" ON "User"("role");`);
 }

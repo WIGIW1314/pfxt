@@ -169,3 +169,95 @@ export async function uploadQrcode(file: File): Promise<QrcodeUploadResult> {
   });
   return res.data;
 }
+
+function canvasToWebpBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("图片压缩失败"));
+          return;
+        }
+        resolve(blob);
+      },
+      "image/webp",
+      quality,
+    );
+  });
+}
+
+function loadImageElement(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("无法读取图片，请重新选择"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function getWebpName(fileName: string) {
+  const safeName = String(fileName || "artwork").trim() || "artwork";
+  const noExt = safeName.replace(/\.[^.]+$/, "");
+  return `${noExt}.webp`;
+}
+
+export async function compressImageToWebp(
+  file: File,
+  options?: {
+    targetMaxBytes?: number;
+    maxDimension?: number;
+    minQuality?: number;
+  },
+) {
+  const targetMaxBytes = options?.targetMaxBytes ?? 200 * 1024;
+  const maxDimension = options?.maxDimension ?? 1920;
+  const minQuality = options?.minQuality ?? 0.35;
+
+  const image = await loadImageElement(file);
+  const maxOriginalSide = Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height);
+  const initialScale = maxOriginalSide > maxDimension ? (maxDimension / maxOriginalSide) : 1;
+  const baseWidth = Math.max(1, Math.round((image.naturalWidth || image.width) * initialScale));
+  const baseHeight = Math.max(1, Math.round((image.naturalHeight || image.height) * initialScale));
+  const scaleSteps = [1, 0.9, 0.8, 0.7, 0.6];
+  const qualitySteps = [0.86, 0.78, 0.7, 0.62, 0.54, 0.46, minQuality].filter((v, idx, arr) => v > 0 && arr.indexOf(v) === idx);
+
+  let bestBlob: Blob | null = null;
+  for (const scale of scaleSteps) {
+    const width = Math.max(1, Math.round(baseWidth * scale));
+    const height = Math.max(1, Math.round(baseHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("浏览器不支持图片压缩");
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
+
+    for (const quality of qualitySteps) {
+      const blob = await canvasToWebpBlob(canvas, quality);
+      if (!bestBlob || blob.size < bestBlob.size) {
+        bestBlob = blob;
+      }
+      if (blob.size <= targetMaxBytes) {
+        bestBlob = blob;
+        break;
+      }
+    }
+    if (bestBlob && bestBlob.size <= targetMaxBytes) {
+      break;
+    }
+  }
+
+  if (!bestBlob) {
+    throw new Error("图片压缩失败");
+  }
+
+  return new File([bestBlob], getWebpName(file.name), { type: "image/webp" });
+}

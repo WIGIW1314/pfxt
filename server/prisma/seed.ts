@@ -12,6 +12,7 @@ async function ensureSchema() {
   DROP TABLE IF EXISTS "ScoreAssignment";
   DROP TABLE IF EXISTS "ScoreItem";
   DROP TABLE IF EXISTS "ScoreTemplate";
+  DROP TABLE IF EXISTS "StudentArtwork";
   DROP TABLE IF EXISTS "Student";
   DROP TABLE IF EXISTS "ActivityUserRole";
   DROP TABLE IF EXISTS "Group";
@@ -93,6 +94,7 @@ async function ensureSchema() {
     "groupId" TEXT NOT NULL,
     "studentNo" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "workName" TEXT,
     "gender" TEXT,
     "className" TEXT,
     "majorName" TEXT,
@@ -107,6 +109,25 @@ async function ensureSchema() {
     CONSTRAINT "Student_groupId_fkey" FOREIGN KEY ("groupId") REFERENCES "Group" ("id") ON DELETE CASCADE ON UPDATE CASCADE
   );
   CREATE UNIQUE INDEX "Student_activityId_studentNo_key" ON "Student"("activityId","studentNo");
+
+  CREATE TABLE "StudentArtwork" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "activityId" TEXT NOT NULL,
+    "studentId" TEXT NOT NULL,
+    "uploadedById" TEXT,
+    "uploaderType" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "fileSize" INTEGER NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "StudentArtwork_activityId_fkey" FOREIGN KEY ("activityId") REFERENCES "Activity" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "StudentArtwork_studentId_fkey" FOREIGN KEY ("studentId") REFERENCES "Student" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "StudentArtwork_uploadedById_fkey" FOREIGN KEY ("uploadedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+  );
+  CREATE INDEX "StudentArtwork_studentId_createdAt_idx" ON "StudentArtwork"("studentId","createdAt");
+  CREATE INDEX "StudentArtwork_activityId_createdAt_idx" ON "StudentArtwork"("activityId","createdAt");
+  CREATE INDEX "StudentArtwork_studentId_uploaderType_idx" ON "StudentArtwork"("studentId","uploaderType");
 
   CREATE TABLE "ScoreTemplate" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -324,13 +345,14 @@ async function main() {
       ["20270002", "李四", "教技 1 班", 2],
       ["20270003", "王五", "教技 2 班", 3],
       ["20270004", "赵六", "教技 2 班", 4],
-    ].map(([studentNo, name, className, orderNo]) =>
+    ].map(([studentNo, name, className, orderNo], index) =>
       prisma.student.create({
         data: {
           activityId: activity.id,
           groupId: groupA.id,
           studentNo: String(studentNo),
           name: String(name),
+          workName: `作品${index + 1}`,
           className: String(className),
           majorName: "教育技术",
           mentorName: "陈老师",
@@ -386,6 +408,7 @@ async function main() {
       groupId: groupB.id,
       studentNo: "20270005",
       name: "孙七",
+      workName: "示例作品",
       className: "教技 3 班",
       majorName: "教育技术",
       mentorName: "刘老师",

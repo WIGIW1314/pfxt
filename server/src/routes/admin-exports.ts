@@ -1,10 +1,14 @@
 import type { FastifyInstance } from "fastify";
+import fs from "node:fs/promises";
 import ExcelJS from "exceljs";
 import dayjs from "dayjs";
+import JSZip from "jszip";
+import sharp from "sharp";
 import { ScoreStatus } from "@prisma/client";
 import { prisma } from "../db.js";
 import type { AuthRequest } from "../types.js";
-import { getStudentSummaryMap, requireAdmin } from "../utils.js";
+import { createHttpError, getStudentSummaryMap, requireAdmin } from "../utils.js";
+import { resolveUploadPathFromUrl } from "./admin-shared.js";
 
 function isVotingActivity(activity: { type?: string | null } | null | undefined): boolean {
   return activity?.type === "投票";
@@ -30,7 +34,80 @@ function buildContentDisposition(chineseName: string, fallbackName: string) {
   return `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(chineseName)}`;
 }
 
+function sanitizeZipFolderName(name: string) {
+  const cleaned = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_");
+  return cleaned || "未命名学生";
+}
+
 export function registerAdminExportRoutes(app: FastifyInstance) {
+  app.get("/api/admin/activities/:activityId/export/artworks", { preHandler: [app.authenticate] }, async (request: AuthRequest, reply) => {
+    await requireAdmin(request);
+    const activityId = (request.params as { activityId: string }).activityId;
+    const activity = await prisma.activity.findUniqueOrThrow({
+      where: { id: activityId },
+      select: { name: true, type: true },
+    });
+    if (!isVotingActivity(activity)) {
+      throw createHttpError("仅投票模式支持导出作品图", 400);
+    }
+
+    const students = await prisma.student.findMany({
+      where: { activityId },
+      orderBy: [{ group: { sortOrder: "asc" } }, { orderNo: "asc" }],
+      select: {
+        id: true,
+        orderNo: true,
+        studentNo: true,
+        name: true,
+        artworks: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            url: true,
+            createdAt: true,
+            uploaderType: true,
+          },
+        },
+      },
+    });
+
+    const zip = new JSZip();
+    for (const student of students) {
+      const folderName = sanitizeZipFolderName(`${student.orderNo}-${student.studentNo}-${student.name}`);
+      const folder = zip.folder(folderName);
+      if (!folder) continue;
+      if (!student.artworks.length) {
+        folder.file("暂无作品图.txt", "暂无作品图");
+        continue;
+      }
+
+      for (let index = 0; index < student.artworks.length; index += 1) {
+        const artwork = student.artworks[index];
+        const artworkPath = resolveUploadPathFromUrl(artwork.url);
+        if (!artworkPath) continue;
+        let fileBuffer: Buffer;
+        try {
+          fileBuffer = await fs.readFile(artworkPath);
+        } catch {
+          continue;
+        }
+        const uploaderLabel = artwork.uploaderType === "ADMIN" ? "管理员" : "评委";
+        const timeLabel = dayjs(artwork.createdAt).format("YYYYMMDD_HHmmss");
+        const fileName = `${String(index + 1).padStart(2, "0")}_${uploaderLabel}_${timeLabel}.webp`;
+        folder.file(fileName, fileBuffer);
+      }
+    }
+
+    const buffer = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 9 },
+    });
+    reply.header("Content-Type", "application/zip");
+    reply.header("Content-Disposition", buildContentDisposition(`${activity.name}-作品图.zip`, "student-artworks.zip"));
+    return reply.send(buffer);
+  });
+
   app.get("/api/admin/activities/:activityId/export/results", { preHandler: [app.authenticate] }, async (request: AuthRequest, reply) => {
     await requireAdmin(request);
     const activityId = (request.params as { activityId: string }).activityId;
@@ -43,6 +120,15 @@ export function registerAdminExportRoutes(app: FastifyInstance) {
         where: { activityId },
         include: {
           group: true,
+          artworks: {
+            select: {
+              id: true,
+              url: true,
+              uploaderType: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+          },
           assignments: {
             where: { isRequired: true },
           },
@@ -83,7 +169,8 @@ export function registerAdminExportRoutes(app: FastifyInstance) {
       workbook.created = new Date();
 
       const sheet = workbook.addWorksheet("投票结果");
-      sheet.columns = [
+      // 基础列（不含图片列，图片列在后面动态添加）
+      const baseCols: Array<{ header: string; key: string; width: number }> = [
         { header: "排名", key: "rankNo", width: 8 },
         { header: "组别", key: "groupName", width: 12 },
         { header: "顺序号", key: "orderNo", width: 10 },
@@ -91,9 +178,19 @@ export function registerAdminExportRoutes(app: FastifyInstance) {
         { header: "姓名", key: "name", width: 12 },
         { header: "性别", key: "gender", width: 8 },
         { header: "班级", key: "className", width: 16 },
+        { header: "作品名", key: "workName", width: 20 },
         { header: "得票数", key: "voteCount", width: 10 },
         { header: "投票评委", key: "judgeNames", width: 36 },
       ];
+
+      const artworkColCount = 5; // 最多5张作品图
+      const artworkCols = Array.from({ length: artworkColCount }, (_, i) => ({
+        header: `作品图${i + 1}`,
+        key: `artwork${i + 1}`,
+        width: 18,
+      }));
+
+      sheet.columns = [...baseCols, ...artworkCols];
 
       const lastCol = toExcelColumnName(sheet.columns!.length);
       sheet.mergeCells(`A1:${lastCol}1`);
@@ -121,34 +218,105 @@ export function registerAdminExportRoutes(app: FastifyInstance) {
       });
       headerRow.height = 24;
 
+      // 辅助函数：将图片文件转换为 JPEG Buffer
+      async function convertImageToJpegBuffer(filePath: string): Promise<Buffer | null> {
+        try {
+          const buffer = await fs.readFile(filePath);
+          return await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
+        } catch {
+          return null;
+        }
+      }
+
+      const IMAGE_ROW_HEIGHT = 80; // 图片行高
+      const IMAGE_COL_WIDTH = 120;  // 图片单元格宽度（像素）
+
       const enriched = results.map((student: any) => {
         const vc = voteCountMap.get(student.id) || { count: 0, judges: [] };
         return { student, voteCount: vc.count, judgeNames: vc.judges.join("、") };
       });
 
-      enriched.sort((a: any, b: any) => b.voteCount - a.voteCount)
-        .forEach((item: any, index: number) => {
-          const row = sheet.addRow({
-            rankNo: index + 1,
-            groupName: item.student.group?.name || "",
-            orderNo: item.student.orderNo,
-            studentNo: item.student.studentNo,
-            name: item.student.name,
-            gender: item.student.gender || "",
-            className: item.student.className || "",
-            voteCount: item.voteCount,
-            judgeNames: item.judgeNames || "暂无",
-          });
-          row.height = 24;
-          row.eachCell((cell) => {
-            cell.border = { top: { style: "thin", color: { argb: "E4ECF8" } }, left: { style: "thin", color: { argb: "E4ECF8" } }, bottom: { style: "thin", color: { argb: "E4ECF8" } }, right: { style: "thin", color: { argb: "E4ECF8" } } };
+      const sorted = enriched.sort((a: any, b: any) => b.voteCount - a.voteCount);
+
+      // 预先加载所有作品图的 JPEG Buffer（避免重复读取文件）
+      const artworkBuffersCache = new Map<string, Buffer | null>();
+
+      for (const item of sorted) {
+        const student = item.student;
+        const artworks = student.artworks || [];
+        for (let i = 0; i < artworks.length; i++) {
+          const key = artworks[i].url;
+          if (!artworkBuffersCache.has(key)) {
+            const filePath = resolveUploadPathFromUrl(key);
+            artworkBuffersCache.set(key, filePath ? await convertImageToJpegBuffer(filePath) : null);
+          }
+        }
+      }
+
+      for (let idx = 0; idx < sorted.length; idx++) {
+        const item = sorted[idx];
+        const student = item.student;
+        const artworks = student.artworks || [];
+
+        const rowData: Record<string, any> = {
+          rankNo: idx + 1,
+          groupName: student.group?.name || "",
+          orderNo: student.orderNo,
+          studentNo: student.studentNo,
+          name: student.name,
+          gender: student.gender || "",
+          className: student.className || "",
+          workName: student.workName || "",
+          voteCount: item.voteCount,
+          judgeNames: item.judgeNames || "暂无",
+        };
+
+        // 图片列留空（图片通过 addImage 嵌入）
+        for (let i = 1; i <= artworkColCount; i++) {
+          rowData[`artwork${i}`] = "";
+        }
+
+        const sheetRow = sheet.addRow(rowData);
+        sheetRow.height = IMAGE_ROW_HEIGHT;
+
+        sheetRow.eachCell((cell) => {
+          // 非图片列加上边框
+          const colKey = (sheet.columns![cell.col - 1] as ExcelJS.Column).key as string;
+          if (!colKey.startsWith("artwork")) {
+            cell.border = {
+              top: { style: "thin", color: { argb: "E4ECF8" } },
+              left: { style: "thin", color: { argb: "E4ECF8" } },
+              bottom: { style: "thin", color: { argb: "E4ECF8" } },
+              right: { style: "thin", color: { argb: "E4ECF8" } },
+            };
             cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
-            if (row.number % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FAFCFF" } };
-          });
+            if (sheetRow.number % 2 === 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FAFCFF" } };
+          }
         });
 
+        // 嵌入作品图（每个作品图一个单元格）
+        const baseColCount = baseCols.length;
+        for (let ai = 0; ai < artworks.length && ai < artworkColCount; ai++) {
+          const artwork = artworks[ai];
+          const jpegBuffer = artworkBuffersCache.get(artwork.url) ?? null;
+          if (!jpegBuffer) continue;
+
+          const imageId = workbook.addImage({
+            buffer: jpegBuffer,
+            extension: "jpeg",
+          });
+
+          // artwork1 列对应 baseColCount+1，artwork2 列对应 baseColCount+2，...
+          const targetCol = baseColCount + ai + 1;
+          sheet.addImage(imageId, {
+            tl: { col: targetCol - 1, row: sheetRow.number - 1 },
+            ext: { width: IMAGE_COL_WIDTH, height: IMAGE_ROW_HEIGHT },
+          });
+        }
+      }
+
       sheet.views = [{ state: "frozen", ySplit: 3 }];
-      sheet.autoFilter = `A3:${lastCol}3`;
+      // 不设置 autoFilter 因为图片列不适合筛选
 
       const buffer = await workbook.xlsx.writeBuffer();
       reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

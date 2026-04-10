@@ -112,12 +112,21 @@ export type QrcodeMeta = {
   original: { url: string; width: number | null; height: number | null };
 };
 
+export type StudentArtwork = {
+  id: string;
+  url: string;
+  uploaderType: "JUDGE" | "ADMIN" | string;
+  uploadedById?: string | null;
+  createdAt: string;
+};
+
 export type Student = {
   id: string;
   activityId: string;
   groupId: string;
   studentNo: string;
   name: string;
+  workName?: string | null;
   gender?: string | null;
   className?: string | null;
   majorName?: string | null;
@@ -149,6 +158,9 @@ export type Student = {
   }>;
   myScoreStatus?: "DRAFT" | "SUBMITTED" | null;
   myVoted?: boolean;
+  artworkCount?: number;
+  canVote?: boolean;
+  artworks?: StudentArtwork[];
   scores?: Score[];
 };
 

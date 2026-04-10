@@ -43,6 +43,7 @@ model User {
   scoreAssignments    ScoreAssignment[]
   createdActivities   Activity[]         @relation("ActivityCreator")
   operationLogs       OperationLog[]
+  uploadedArtworks    StudentArtwork[]
 }
 
 model Activity {
@@ -84,6 +85,7 @@ model Activity {
   scores                       Score[]
   activityRoles                ActivityUserRole[]
   customRoles                  ActivityCustomRole[]
+  artworks                     StudentArtwork[]
 }
 
 model ActivityCustomRole {
@@ -152,6 +154,7 @@ model Student {
   groupId     String
   studentNo   String
   name        String
+  workName    String?
   gender      String?
   className   String?
   majorName   String?
@@ -168,9 +171,30 @@ model Student {
   customRole  ActivityCustomRole? @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
   assignments ScoreAssignment[]
   scores      Score[]
+  artworks    StudentArtwork[]
 
   @@unique([activityId, studentNo])
   @@index([activityId, groupId, orderNo])
+}
+
+model StudentArtwork {
+  id          String   @id @default(cuid())
+  activityId  String
+  studentId   String
+  uploadedById String?
+  uploaderType String
+  url         String
+  fileName    String
+  mimeType    String
+  fileSize    Int
+  createdAt   DateTime @default(now())
+  activity    Activity @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  uploader    User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([studentId, createdAt])
+  @@index([activityId, createdAt])
+  @@index([studentId, uploaderType])
 }
 
 model ScoreTemplate {

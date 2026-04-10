@@ -44,11 +44,31 @@
   .el-checkbox__input {
     width: 18px;
     height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    flex: 0 0 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .el-checkbox__inner {
     width: 18px !important;
     height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    display: block;
+    box-sizing: border-box;
+    transform: none !important;
+  }
+
+  .el-checkbox__inner::after {
+    left: 6px !important;
+    top: 2px !important;
+  }
+
+  .el-checkbox__label {
+    line-height: 18px;
   }
 }
 
@@ -550,6 +570,114 @@ body::after {
   overflow-wrap: anywhere;
 }
 
+.admin-log-row {
+  padding: 12px;
+}
+
+.admin-log-title-wrap {
+  gap: 8px;
+}
+
+.admin-log-title-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-log-title {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.admin-log-meta {
+  margin-bottom: 8px;
+}
+
+.admin-log-details {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-log-block {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.36);
+}
+
+.admin-log-block-title {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f7195;
+}
+
+.admin-log-change-list {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-log-change-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.admin-log-change-key {
+  color: #5f7195;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.admin-log-change-before {
+  color: #8b99b4;
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+
+.admin-log-change-arrow {
+  color: #8ea4cf;
+  font-weight: 700;
+}
+
+.admin-log-change-after {
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.admin-log-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-log-kv-list {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-log-kv-item {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.admin-log-kv-key {
+  color: #6f83aa;
+  font-weight: 600;
+}
+
+.admin-log-kv-value {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .admin-activity-row-title,
 .admin-activity-row-meta,
 .tag-row {
@@ -577,6 +705,19 @@ body::after {
   .admin-activity-toolbar-actions,
   .admin-activity-row-actions {
     justify-content: flex-start;
+  }
+
+  .admin-log-snapshot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-log-change-item {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .admin-log-change-arrow {
+    display: none;
   }
 }
 
@@ -1025,6 +1166,106 @@ body::after {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.work-name-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(64, 158, 255, 0.24);
+  background: linear-gradient(135deg, rgba(227, 242, 255, 0.92), rgba(244, 250, 255, 0.84));
+  color: #2f80ed;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: 0 6px 14px rgba(72, 92, 148, 0.08);
+}
+
+.work-name-pill.is-empty {
+  border-color: rgba(125, 143, 179, 0.22);
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--muted);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  border: 0 !important;
+}
+
+.admin-student-artwork-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter, #ebeef5);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.admin-student-artwork-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-student-artwork-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-student-artwork-empty {
+  margin-top: 8px;
+}
+
+.admin-student-artwork-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+}
+
+.admin-student-artwork-item {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 143, 179, 0.22);
+  background: #fff;
+}
+
+.admin-student-artwork-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: block;
+}
+
+.admin-student-artwork-delete {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  bottom: auto;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  height: 24px !important;
+  min-height: 24px !important;
+  min-width: 30px !important;
+  padding: 0 6px !important;
+  border-radius: 6px !important;
+  line-height: 1 !important;
+  font-size: 12px !important;
 }
 
 .judge-activity-card {

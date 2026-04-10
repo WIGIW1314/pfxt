@@ -57,7 +57,7 @@ const judgeItems = computed(() => {
   if (isVoting) {
     return [
       { label: "主页", path: "/judge/home", icon: DataBoard },
-      { label: "去投票", path: "/judge/voting", icon: User },
+      { label: "投票", path: "/judge/voting", icon: User },
       { label: "公告", path: "/judge/announcement", icon: ChatLineSquare },
       { label: "我的", path: "/judge/profile", icon: Management },
     ];

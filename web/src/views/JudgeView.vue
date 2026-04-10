@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { ArrowDown, Calendar, ChatLineSquare, Check, Document, Download, EditPen, Files, Lock, Postcard, Search, UploadFilled, User, View, Warning } from "@element-plus/icons-vue";
+import { ArrowDown, Calendar, Camera, ChatLineSquare, Check, Delete, Document, Download, EditPen, Files, Lock, Postcard, Search, UploadFilled, User, View, Warning } from "@element-plus/icons-vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import AppShell from "../components/AppShell.vue";
 import DocViewer from "../components/DocViewer.vue";
-import { api, downloadFile } from "../api";
+import CameraDialog from "../components/CameraDialog.vue";
+import { api, compressImageToWebp, downloadFile } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { useSyncStore } from "../stores/sync";
 import { formatBJ } from "../date";
 import { useModalHistory } from "../composables/useModalHistory";
 import { distributeScore } from "../score-distribute";
 import { matchesSearchKeyword } from "../utils/search";
-import type { ScoreTemplate, Student } from "../types";
+import type { ScoreTemplate, Student, StudentArtwork } from "../types";
 
 const ScoreDialog = defineAsyncComponent(() => import("../components/ScoreDialog.vue"));
 
@@ -40,7 +41,10 @@ const compactScoreTable = computed(() => viewportWidth.value < 768);
 const batchLoading = ref<"" | "save-draft" | "submit-score" | "reset-score">("");
 const rowCommentLoading = reactive<Record<string, boolean>>({});
 const pageLoading = ref(true);
-const exportProgress = reactive({
+const artworkUploading = reactive<Record<string, boolean>>({});
+const artworkDeleting = reactive<Record<string, boolean>>({});
+const cameraOpen = ref(false);
+const cameraStudentId = ref<string | null>(null);const exportProgress = reactive({
   visible: false,
   title: "",
   status: "",
@@ -69,6 +73,15 @@ useModalHistory(
     return true;
   },
   "judge-export-progress",
+);
+
+useModalHistory(
+  () => cameraOpen.value,
+  async () => {
+    cameraOpen.value = false;
+    return true;
+  },
+  "judge-camera",
 );
 
 const activityId = computed(() => currentActivity.value?.activity?.id || auth.currentActivityRole?.activityId || "");
@@ -123,10 +136,29 @@ const judgeAnnouncementDocFiles = computed(() => {
 const isTotalOnly = computed(() => template.value?.scoreMode === "TOTAL" || !template.value?.items?.length);
 const filteredStudents = computed(() =>
   students.value.filter((student) =>
-    matchesSearchKeyword([student.name, student.studentNo, student.className], keyword.value),
+    matchesSearchKeyword([student.name, student.studentNo, student.className, student.workName], keyword.value),
   ),
 );
 const dirtyStudentIds = reactive(new Set<string>());
+
+function getStudentArtworks(student: Student): StudentArtwork[] {
+  return Array.isArray(student.artworks) ? student.artworks : [];
+}
+
+function getStudentArtworkCount(student: Student) {
+  if (typeof student.artworkCount === "number") return student.artworkCount;
+  return getStudentArtworks(student).length;
+}
+
+function canStudentVote(student: Student) {
+  if (!isVotingMode.value) return true;
+  if (typeof student.canVote === "boolean") return student.canVote;
+  return getStudentArtworkCount(student) > 0;
+}
+
+function isArtworkReadonly() {
+  return !isVotingMode.value || isLocked.value;
+}
 
 // Deep watch rowForms, savedRowSignatures, and students to reliably catch changes
 watch(
@@ -341,9 +373,124 @@ async function resetScore(student: Student) {
   }
 }
 
+function triggerJudgeArtworkUpload(studentId: string, mode: "camera" | "gallery" = "camera") {
+  if (mode === "camera") {
+    cameraStudentId.value = studentId;
+    cameraOpen.value = true;
+    return;
+  }
+  const input = document.getElementById(`judge-artwork-input-gal-${studentId}`) as HTMLInputElement | null;
+  if (input) {
+    input.value = "";
+    input.click();
+  }
+}
+
+async function handleCameraCapture(blob: Blob) {
+  const studentId = cameraStudentId.value;
+  if (!studentId) return;
+  const student = students.value.find((s) => s.id === studentId);
+  if (!student) return;
+  const file = new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" });
+  try {
+    await uploadJudgeArtwork(student, file);
+    cameraOpen.value = false;
+    cameraStudentId.value = null;
+  } catch {
+    // 上传失败时不关闭 dialog，让用户重试
+  }
+}
+
+async function uploadJudgeArtwork(student: Student, rawFile: File) {
+  if (isArtworkReadonly()) {
+    ElMessage.warning(lockReason.value + "，无法上传作品图");
+    return;
+  }
+  if (!rawFile) return;
+  if (!rawFile.type.startsWith("image/")) {
+    ElMessage.warning("请上传图片文件");
+    return;
+  }
+
+  artworkUploading[student.id] = true;
+  try {
+    const webpFile = await compressImageToWebp(rawFile, { targetMaxBytes: 200 * 1024, maxDimension: 1920 });
+    if (webpFile.size > 220 * 1024) {
+      ElMessage.warning("图片已压缩，但仍超过 200KB，系统将继续上传");
+    }
+    const formData = new FormData();
+    formData.append("file", webpFile);
+    const { data } = await api.post(`/api/judge/activities/${activityId.value}/students/${student.id}/artworks`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    const incomingArtwork = data?.artwork as StudentArtwork | undefined;
+    students.value = students.value.map((item) => {
+      if (item.id !== student.id) return item;
+      const artworkMap = new Map<string, StudentArtwork>();
+      if (incomingArtwork?.id) {
+        artworkMap.set(incomingArtwork.id, incomingArtwork);
+      }
+      getStudentArtworks(item).forEach((art) => {
+        if (!artworkMap.has(art.id)) artworkMap.set(art.id, art);
+      });
+      const artworks = Array.from(artworkMap.values());
+      return {
+        ...item,
+        artworks,
+        artworkCount: typeof data?.artworkCount === "number" ? data.artworkCount : artworks.length,
+        canVote: typeof data?.canVote === "boolean" ? data.canVote : artworks.length > 0,
+      };
+    });
+    ElMessage.success("作品图上传成功");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || "作品图上传失败");
+  } finally {
+    artworkUploading[student.id] = false;
+  }
+}
+
+async function onJudgeArtworkInputChange(student: Student, event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file) return;
+  await uploadJudgeArtwork(student, file);
+  if (input) input.value = "";
+}
+
+async function deleteJudgeArtwork(student: Student, artwork: StudentArtwork) {
+  if (isArtworkReadonly()) {
+    ElMessage.warning(lockReason.value + "，无法删除作品图");
+    return;
+  }
+  artworkDeleting[artwork.id] = true;
+  try {
+    const { data } = await api.delete(`/api/judge/activities/${activityId.value}/students/${student.id}/artworks/${artwork.id}`);
+    students.value = students.value.map((item) => {
+      if (item.id !== student.id) return item;
+      const artworks = getStudentArtworks(item).filter((entry) => entry.id !== artwork.id);
+      return {
+        ...item,
+        artworks,
+        artworkCount: typeof data?.artworkCount === "number" ? data.artworkCount : artworks.length,
+        canVote: typeof data?.canVote === "boolean" ? data.canVote : artworks.length > 0,
+      };
+    });
+    ElMessage.success("作品图已删除");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || "删除作品图失败");
+  } finally {
+    artworkDeleting[artwork.id] = false;
+  }
+}
+
 async function castVote(student: Student) {
   if (isLocked.value) {
     ElMessage.warning(lockReason.value + "，只读");
+    return;
+  }
+  if (!canStudentVote(student)) {
+    ElMessage.warning("请先上传作品图后再投票");
     return;
   }
   if (scoreOpening.value) return;
@@ -834,8 +981,9 @@ watch(
         || evt.type === "judge.updated"
         || evt.type === "template.updated"
         || evt.type === "student.updated"
+        || evt.type === "student.artwork.updated"
       ) {
-        await fetchJudgeData({ refreshBinding: evt.type !== "student.updated" });
+        await fetchJudgeData({ refreshBinding: evt.type !== "student.updated" && evt.type !== "student.artwork.updated" });
         await refreshOpenStudentDialogs(evt.payload?.studentId as string | undefined);
       }
     } catch {
@@ -996,10 +1144,18 @@ onBeforeRouteUpdate(async () => {
       <section class="glass-panel" style="padding: 12px">
         <div class="panel-header">
           <h3 style="margin: 0">学生列表</h3>
-            <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级/拼音" />
+            <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级/作品名/拼音" />
         </div>
           <div class="card-list">
-            <div v-for="student in filteredStudents" :key="student.id" class="glass-panel entity-card judge-student-card">
+            <div
+              v-for="student in filteredStudents"
+              :key="student.id"
+              class="glass-panel entity-card judge-student-card"
+              :class="{
+                'judge-card-submitted': student.myVoted || student.myScoreStatus === 'SUBMITTED',
+                'judge-card-draft': student.myScoreStatus === 'DRAFT',
+              }"
+            >
               <template v-if="isVotingMode">
                 <div class="panel-header">
                   <div class="student-card-name-row">
@@ -1007,6 +1163,7 @@ onBeforeRouteUpdate(async () => {
                     <div>
                       <h4 style="margin: 0">{{ student.name }}</h4>
                       <div class="muted">{{ student.studentNo }} · {{ student.className }}</div>
+                      <div v-if="student.workName && student.workName.trim()" class="work-name-pill">作品名：{{ student.workName.trim() }}</div>
                     </div>
                   </div>
                   <div class="tag-row">
@@ -1022,10 +1179,70 @@ onBeforeRouteUpdate(async () => {
                     <el-tag v-if="currentActivity?.activity?.showVoteCountToJudge" round>得票 {{ student.summary?.submittedJudgeCount ?? 0 }}</el-tag>
                   </div>
                 </div>
-                <div v-if="student.myVoted" style="display: flex; gap: 8px; margin-top: 8px">
-                  <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
-                </div>
-                <el-button v-else :disabled="isLocked" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+                <template v-if="student.myVoted">
+                  <div style="display: flex; gap: 8px; margin-top: 8px">
+                    <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
+                    <div class="judge-artwork-header">
+                      <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
+                      <div class="judge-artwork-actions">
+                        <el-button
+                          size="small"
+                          type="primary"
+                          plain
+                          :icon="Camera"
+                          :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                          :loading="artworkUploading[student.id]"
+                          @click="triggerJudgeArtworkUpload(student.id, 'camera')"
+                        >
+                          拍照
+                        </el-button>
+                        <el-button
+                          size="small"
+                          plain
+                          :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                          @click="triggerJudgeArtworkUpload(student.id, 'gallery')"
+                        >
+                          相册
+                        </el-button>
+                      </div>
+                      <input
+                        :id="`judge-artwork-input-gal-${student.id}`"
+                        accept="image/*"
+                        type="file"
+                        class="visually-hidden"
+                        @change="onJudgeArtworkInputChange(student, $event)"
+                      />
+                    </div>
+                    <div v-if="!getStudentArtworks(student).length" class="muted judge-artwork-empty">暂无作品图</div>
+                    <div v-else class="judge-artwork-grid">
+                      <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="judge-artwork-item">
+                        <el-image
+                          :src="artwork.url"
+                          :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                          :initial-index="index"
+                          fit="cover"
+                          class="judge-artwork-image"
+                        />
+                        <el-button
+                          class="judge-artwork-delete"
+                          size="small"
+                          type="danger"
+                          plain
+                          :icon="Delete"
+                          :disabled="isArtworkReadonly() || artworkDeleting[artwork.id]"
+                          :loading="artworkDeleting[artwork.id]"
+                          @click="deleteJudgeArtwork(student, artwork)"
+                        />
+                      </div>
+                    </div>
+                    <div v-if="!canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
+                  </div>
+                  <el-button :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+                </template>
               </template>
               <template v-else>
               <div class="panel-header">
@@ -1053,7 +1270,7 @@ onBeforeRouteUpdate(async () => {
                   <el-tag round>均分 {{ formatAvgScore(student.summary?.avgScore) }}</el-tag>
                 </div>
               </div>
-              <div style="margin-bottom: 12px">
+              <div class="peer-count-row">
                 <el-button
                   size="small"
                   plain
@@ -1305,16 +1522,22 @@ onBeforeRouteUpdate(async () => {
       <section class="glass-panel" style="padding: 12px">
         <div class="panel-header">
           <h3 style="margin: 0">投票</h3>
-          <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级/拼音" />
+          <el-input v-model="keyword" style="width: min(220px, 100%)" placeholder="搜索姓名/学号/班级/作品名/拼音" />
         </div>
         <div class="card-list">
-          <div v-for="student in filteredStudents" :key="student.id" class="glass-panel entity-card judge-student-card">
+          <div
+            v-for="student in filteredStudents"
+            :key="student.id"
+            class="glass-panel entity-card judge-student-card"
+            :class="{ 'judge-card-submitted': student.myVoted }"
+          >
             <div class="panel-header">
               <div class="student-card-name-row">
                 <span class="student-order-badge">#{{ student.orderNo }}</span>
                 <div>
                   <h4 style="margin: 0">{{ student.name }}</h4>
                   <div class="muted">{{ student.studentNo }} · {{ student.className }}</div>
+                  <div v-if="student.workName && student.workName.trim()" class="work-name-pill">作品名：{{ student.workName.trim() }}</div>
                 </div>
               </div>
               <div class="tag-row">
@@ -1330,10 +1553,70 @@ onBeforeRouteUpdate(async () => {
                 <el-tag v-if="currentActivity?.activity?.showVoteCountToJudge" round>得票 {{ student.summary?.submittedJudgeCount ?? 0 }}</el-tag>
               </div>
             </div>
-            <div v-if="student.myVoted" style="display: flex; gap: 8px; margin-top: 8px">
-              <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
-            </div>
-            <el-button v-else :disabled="isLocked" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+            <template v-if="student.myVoted">
+              <div style="display: flex; gap: 8px; margin-top: 8px">
+                <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
+                <div class="judge-artwork-header">
+                  <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
+                  <div class="judge-artwork-actions">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      plain
+                      :icon="Camera"
+                      :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                      :loading="artworkUploading[student.id]"
+                      @click="triggerJudgeArtworkUpload(student.id, 'camera')"
+                    >
+                      拍照
+                    </el-button>
+                    <el-button
+                      size="small"
+                      plain
+                      :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                      @click="triggerJudgeArtworkUpload(student.id, 'gallery')"
+                    >
+                      相册
+                    </el-button>
+                  </div>
+                  <input
+                    :id="`judge-artwork-input-gal-${student.id}`"
+                    accept="image/*"
+                    type="file"
+                    class="visually-hidden"
+                    @change="onJudgeArtworkInputChange(student, $event)"
+                  />
+                </div>
+                <div v-if="!getStudentArtworks(student).length" class="muted judge-artwork-empty">暂无作品图</div>
+                <div v-else class="judge-artwork-grid">
+                  <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="judge-artwork-item">
+                    <el-image
+                      :src="artwork.url"
+                      :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                      :initial-index="index"
+                      fit="cover"
+                      class="judge-artwork-image"
+                    />
+                    <el-button
+                      class="judge-artwork-delete"
+                      size="small"
+                      type="danger"
+                      plain
+                      :icon="Delete"
+                      :disabled="isArtworkReadonly() || artworkDeleting[artwork.id]"
+                      :loading="artworkDeleting[artwork.id]"
+                      @click="deleteJudgeArtwork(student, artwork)"
+                    />
+                  </div>
+                </div>
+                <div v-if="!canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
+              </div>
+              <el-button :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+            </template>
           </div>
         </div>
       </section>
@@ -1380,6 +1663,11 @@ onBeforeRouteUpdate(async () => {
       :show-comment-ui="showCommentUi"
       :show-question-ui="showQuestionUi"
       @success="handleSingleScoreSuccess"
+    />
+
+    <CameraDialog
+      v-model="cameraOpen"
+      @capture="handleCameraCapture"
     />
 
     <el-dialog
@@ -1567,5 +1855,165 @@ onBeforeRouteUpdate(async () => {
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+}
+
+.peer-count-row {
+  margin-bottom: 12px;
+}
+
+.judge-card-submitted {
+  border-left: 3px solid var(--success) !important;
+}
+
+.judge-card-draft {
+  border-left: 3px solid var(--warning) !important;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  border: 0 !important;
+}
+
+.judge-artwork-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.judge-artwork-panel.need-upload {
+  border-color: rgba(245, 108, 108, 0.48);
+  background: rgba(255, 247, 247, 0.9);
+}
+
+.judge-artwork-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.judge-artwork-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.judge-artwork-empty {
+  margin-top: 8px;
+}
+
+.judge-artwork-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.judge-artwork-item {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 143, 179, 0.22);
+  background: #fff;
+}
+
+.judge-artwork-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: block;
+}
+
+.judge-artwork-delete {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  min-width: 30px !important;
+  border-radius: 6px !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+}
+.judge-artwork-delete :deep(.el-icon) {
+  margin: 0 !important;
+}
+
+.judge-vote-block-hint {
+  margin-top: 8px;
+  color: #d64545;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .judge-student-card.entity-card {
+    padding: 8px 10px;
+  }
+
+  .judge-student-card .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+
+  .student-order-badge {
+    min-width: 26px;
+    height: 26px;
+    font-size: 11px;
+    border-radius: 6px;
+  }
+
+  .student-card-name-row {
+    gap: 8px;
+  }
+
+  .judge-student-card .tag-row {
+    gap: 4px;
+  }
+
+  .work-name-pill {
+    margin-top: 2px;
+    padding: 1px 8px;
+    font-size: 11px;
+  }
+
+  .peer-count-row {
+    margin-bottom: 6px;
+  }
+
+  .peer-count-btn {
+    height: 24px;
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .judge-card-submitted {
+    border-left-width: 3px;
+  }
+
+  .judge-card-draft {
+    border-left-width: 3px;
+  }
+
+  .judge-artwork-panel {
+    padding: 8px;
+  }
+
+  .judge-artwork-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 </style>

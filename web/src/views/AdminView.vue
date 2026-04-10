@@ -2,15 +2,16 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, ElSkeleton } from "element-plus";
-import { Checked, Collection, Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Search, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
+import { Camera, Checked, Collection, Connection, Delete, Document, EditPen, Histogram, Lock, Plus, RefreshRight, Search, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
 import AppShell from "../components/AppShell.vue";
-import { api, downloadFile, invalidateCache, uploadQrcode } from "../api";
+import CameraDialog from "../components/CameraDialog.vue";
+import { api, compressImageToWebp, downloadFile, invalidateCache, uploadQrcode } from "../api";
 import { useAuthStore } from "../stores/auth";
-import { formatBJ } from "../date";
+import { dayjs, formatBJ } from "../date";
 import { useSyncStore } from "../stores/sync";
 import { useModalHistory } from "../composables/useModalHistory";
 import { matchesSearchKeyword } from "../utils/search";
-import type { Activity, ActivityCustomRole, Group, ScoreTemplate, Student } from "../types";
+import type { Activity, ActivityCustomRole, Group, ScoreTemplate, Student, StudentArtwork } from "../types";
 
 const ImportDialog = defineAsyncComponent(() => import("../components/ImportDialog.vue"));
 const RichEditor = defineAsyncComponent(() => import("../components/RichEditor.vue"));
@@ -50,6 +51,19 @@ function ringStrokeColor(progress: number): string {
 }
 const currentActivityLocked = computed(() => Boolean(currentActivity.value?.isLocked));
 const isVotingMode = computed(() => currentActivity.value?.type === "投票");
+const studentArtworkUploading = reactive<Record<string, boolean>>({});
+const studentArtworkDeleting = reactive<Record<string, boolean>>({});
+const adminCameraOpen = ref(false);
+const adminCameraStudentId = ref<string | null>(null);
+
+function getStudentArtworks(student: Student): StudentArtwork[] {
+  return Array.isArray(student.artworks) ? student.artworks : [];
+}
+
+function getStudentArtworkCount(student: Student) {
+  if (typeof student.artworkCount === "number") return student.artworkCount;
+  return getStudentArtworks(student).length;
+}
 const onlineRoleLabelMap: Record<string, string> = {
   SUPER_ADMIN: "系统管理员",
   ACTIVITY_ADMIN: "管理员",
@@ -90,6 +104,7 @@ type ResultRow = {
   groupId: string;
   studentNo: string;
   name: string;
+  workName?: string | null;
   gender?: string | null;
   className?: string | null;
   orderNo: number;
@@ -101,6 +116,7 @@ type ResultRow = {
   summary: ResultSummary | null;
   voteCount?: number;
   votedJudgeNames?: string;
+  artworks?: Array<{ id: string; url: string; uploaderType: string; createdAt: string }>;
 };
 const results = ref<ResultRow[]>([]);
 const activeTemplate = computed(
@@ -351,6 +367,527 @@ function getFinalScoreTextColor(score: any) {
   return "#42b24a";
 }
 
+type OperationLogEntry = {
+  id: string;
+  operatorName?: string | null;
+  module?: string | null;
+  action?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  beforeData?: string | null;
+  afterData?: string | null;
+  createdAt?: string | null;
+};
+
+type ReadableLogField = {
+  label: string;
+  value: string;
+};
+
+type ReadableLogChange = {
+  label: string;
+  before: string;
+  after: string;
+};
+
+type ReadableLogItem = {
+  id: string;
+  raw: OperationLogEntry;
+  summary: string;
+  moduleLabel: string;
+  actionLabel: string;
+  actionTagType: "success" | "warning" | "danger" | "info";
+  targetLabel: string;
+  operatorLabel: string;
+  targetIdLabel: string;
+  beforeFields: ReadableLogField[];
+  afterFields: ReadableLogField[];
+  changes: ReadableLogChange[];
+};
+
+const LOG_MODULE_KEY_ALIASES: Record<string, string> = {
+  activities: "activity",
+  scoretemplate: "template",
+  "score-template": "template",
+  customrole: "custom-role",
+  "custom-role": "custom-role",
+  activityuserrole: "activity-user-role",
+  "activity-user-roles": "activity-user-role",
+  activityrole: "activity-user-role",
+  operationlog: "log",
+  "operation-log": "log",
+  logs: "log",
+};
+
+const LOG_ACTION_KEY_ALIASES: Record<string, string> = {
+  add: "create",
+  new: "create",
+  edit: "update",
+  remove: "delete",
+  destroyed: "delete",
+  resetpassword: "reset-password",
+  "reset-password": "reset-password",
+  lockactivity: "lock",
+  unlockactivity: "unlock",
+  deactivate: "disable",
+  assignjudge: "assign",
+  unassignjudge: "unassign",
+};
+
+const LOG_TARGET_KEY_ALIASES: Record<string, string> = {
+  activityrole: "activity-user-role",
+  activityuserrole: "activity-user-role",
+  scoretemplate: "template",
+  operationlog: "log",
+};
+
+const LOG_MODULE_LABELS: Record<string, string> = {
+  activity: "活动",
+  score: "评分",
+  student: "学生",
+  group: "分组",
+  judge: "评委",
+  "activity-user-role": "评委分配",
+  role: "角色",
+  "custom-role": "自定义角色",
+  user: "用户",
+  template: "评分模板",
+  system: "系统",
+  log: "日志",
+};
+
+const LOG_ACTION_LABELS: Record<string, string> = {
+  create: "创建",
+  clone: "复制",
+  update: "更新",
+  delete: "删除",
+  upload: "上传",
+  activate: "设为当前活动",
+  enable: "启用",
+  disable: "停用",
+  lock: "锁定",
+  unlock: "解锁",
+  submit: "提交评分",
+  reset: "重置评分",
+  "reset-password": "重置密码",
+  assign: "分配",
+  unassign: "移除分配",
+  import: "导入",
+  export: "导出",
+};
+
+const LOG_ACTION_TAG_TYPES: Record<string, "success" | "warning" | "danger" | "info"> = {
+  create: "success",
+  clone: "success",
+  update: "warning",
+  delete: "danger",
+  upload: "success",
+  activate: "info",
+  enable: "success",
+  disable: "warning",
+  lock: "warning",
+  unlock: "success",
+  submit: "success",
+  reset: "warning",
+  "reset-password": "warning",
+  assign: "success",
+  unassign: "warning",
+  import: "success",
+  export: "info",
+};
+
+const LOG_TARGET_LABELS: Record<string, string> = {
+  activity: "活动",
+  student: "学生",
+  artwork: "作品图",
+  group: "分组",
+  judge: "评委",
+  user: "用户",
+  "activity-user-role": "评委",
+  template: "评分模板",
+  role: "角色",
+  "custom-role": "自定义角色",
+  score: "评分记录",
+  log: "日志",
+};
+
+const LOG_FIELD_LABELS: Record<string, string> = {
+  id: "ID",
+  name: "名称",
+  code: "编码",
+  type: "类型",
+  role: "角色",
+  username: "账号",
+  realName: "姓名",
+  studentNo: "学号",
+  workName: "作品名",
+  className: "班级",
+  groupName: "分组",
+  groupId: "分组ID",
+  userId: "用户ID",
+  studentId: "学生ID",
+  studentName: "学生姓名",
+  uploaderType: "上传来源",
+  url: "文件地址",
+  activityId: "活动ID",
+  sourceActivityId: "来源活动ID",
+  targetId: "目标ID",
+  targetType: "目标类型",
+  module: "模块",
+  action: "动作",
+  totalScore: "总分",
+  isActive: "是否当前活动",
+  isLocked: "是否锁定",
+  sortOrder: "排序",
+  description: "描述",
+  location: "地点",
+  note: "备注",
+  scoreMode: "评分模式",
+  calcMode: "计算方式",
+  showCommentUi: "显示评语",
+  showQuestionUi: "显示提问",
+  showExportZip: "允许导出ZIP",
+  showExportXlsx: "允许导出XLSX",
+  showVoteCountToJudge: "评委可见票数",
+  isPublicVisible: "公开可见",
+  startTime: "开始时间",
+  endTime: "结束时间",
+  createdAt: "创建时间",
+  updatedAt: "更新时间",
+};
+
+const LOG_VALUE_LABELS: Record<string, Record<string, string>> = {
+  role: {
+    "super-admin": "系统管理员",
+    "activity-admin": "活动管理员",
+    judge: "评委",
+    secretary: "秘书",
+  },
+  scoreMode: {
+    itemized: "分项评分",
+    total: "总分评分",
+  },
+  calcMode: {
+    "simple-avg": "简单平均",
+    "drop-extremes": "去极值平均",
+    "weighted-avg": "加权平均",
+    "all-submitted": "全部提交后计算",
+  },
+  uploaderType: {
+    admin: "管理员",
+    judge: "评委",
+  },
+};
+
+const LOG_FIELD_PRIORITY = [
+  "name",
+  "realName",
+  "username",
+  "studentNo",
+  "code",
+  "type",
+  "role",
+  "groupName",
+  "className",
+  "totalScore",
+  "activityId",
+  "groupId",
+  "studentId",
+  "userId",
+  "targetId",
+  "id",
+];
+
+type LogSummaryContext = {
+  log: OperationLogEntry;
+  operator: string;
+  moduleKey: string;
+  actionKey: string;
+  targetKey: string;
+  moduleLabel: string;
+  actionLabel: string;
+  targetLabel: string;
+  subjectName: string;
+  beforeRecord: Record<string, unknown> | null;
+  afterRecord: Record<string, unknown> | null;
+};
+
+const LOG_SUMMARY_TEMPLATES: Record<string, (ctx: LogSummaryContext) => string> = {
+  "activity:create": (ctx) => `${ctx.operator}创建了活动${ctx.subjectName}`,
+  "activity:clone": (ctx) => `${ctx.operator}复制了活动${ctx.subjectName}`,
+  "activity:delete": (ctx) => `${ctx.operator}删除了活动${ctx.subjectName}`,
+  "activity:activate": (ctx) => `${ctx.operator}将活动${ctx.subjectName}设为当前活动`,
+  "group:create": (ctx) => `${ctx.operator}创建了分组${ctx.subjectName}`,
+  "group:delete": (ctx) => `${ctx.operator}删除了分组${ctx.subjectName}`,
+  "student:create": (ctx) => `${ctx.operator}新增了学生${ctx.subjectName}`,
+  "student:delete": (ctx) => `${ctx.operator}删除了学生${ctx.subjectName}`,
+  "template:create": (ctx) => `${ctx.operator}创建了评分模板${ctx.subjectName}`,
+  "template:delete": (ctx) => `${ctx.operator}删除了评分模板${ctx.subjectName}`,
+  "activity-user-role:create": (ctx) => `${ctx.operator}分配了评委${ctx.subjectName}`,
+  "activity-user-role:delete": (ctx) => `${ctx.operator}移除了评委${ctx.subjectName}`,
+  "activity-user-role:update": (ctx) => `${ctx.operator}调整了评委${ctx.subjectName}的角色或分组`,
+  "score:submit:student": (ctx) => `${ctx.operator}提交了学生${ctx.subjectName}的评分`,
+  "score:reset:student": (ctx) => `${ctx.operator}重置了学生${ctx.subjectName}的评分`,
+  "student:upload:artwork": (ctx) => `${ctx.operator}上传了学生${ctx.subjectName}的作品图`,
+  "student:delete:artwork": (ctx) => `${ctx.operator}删除了学生${ctx.subjectName}的作品图`,
+  "user:reset-password": (ctx) => `${ctx.operator}重置了用户${ctx.subjectName}的密码`,
+};
+
+function toLogKey(value: unknown) {
+  return String(value ?? "").trim().toLowerCase().replace(/[_\s]+/g, "-");
+}
+
+function normalizeModuleKey(value: unknown) {
+  const key = toLogKey(value);
+  return LOG_MODULE_KEY_ALIASES[key] || key;
+}
+
+function normalizeActionKey(value: unknown) {
+  const key = toLogKey(value);
+  return LOG_ACTION_KEY_ALIASES[key] || key;
+}
+
+function normalizeTargetKey(value: unknown) {
+  const key = toLogKey(value);
+  return LOG_TARGET_KEY_ALIASES[key] || key;
+}
+
+function parseLogPayload(raw: unknown): unknown {
+  if (raw == null || raw === "") return null;
+  if (typeof raw !== "string") return raw;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function parseBooleanValue(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value !== "string") return null;
+  const normalized = toLogKey(value);
+  if (["true", "1", "yes", "on", "是"].includes(normalized)) return true;
+  if (["false", "0", "no", "off", "否"].includes(normalized)) return false;
+  return null;
+}
+
+function shortId(value: string) {
+  if (value.length <= 14) return value;
+  return `${value.slice(0, 10)}...`;
+}
+
+function formatLogValue(value: unknown, fieldKey = ""): string {
+  if (value == null || value === "") return "空";
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "空";
+
+    const valueMap = LOG_VALUE_LABELS[fieldKey];
+    if (valueMap) {
+      const normalized = toLogKey(trimmed);
+      if (valueMap[normalized]) return valueMap[normalized];
+    }
+
+    if (fieldKey.toLowerCase().endsWith("id")) {
+      return shortId(trimmed);
+    }
+    if (/^\d{4}-\d{1,2}-\d{1,2}/.test(trimmed) && dayjs(trimmed).isValid()) {
+      return formatBJ(trimmed);
+    }
+    if (trimmed.length > 120) {
+      return `${trimmed.slice(0, 120)}...`;
+    }
+    return trimmed;
+  }
+  if (Array.isArray(value)) {
+    return value.length ? `共 ${value.length} 项` : "空列表";
+  }
+  return "对象数据";
+}
+
+function logFieldLabel(key: string): string {
+  return LOG_FIELD_LABELS[key] || key;
+}
+
+function sortedLogKeys(record: Record<string, unknown>): string[] {
+  const keys = Object.keys(record);
+  return keys.sort((a, b) => {
+    const ai = LOG_FIELD_PRIORITY.indexOf(a);
+    const bi = LOG_FIELD_PRIORITY.indexOf(b);
+    const aScore = ai === -1 ? 999 : ai;
+    const bScore = bi === -1 ? 999 : bi;
+    if (aScore !== bScore) return aScore - bScore;
+    return a.localeCompare(b, "zh-CN");
+  });
+}
+
+function toReadableFields(payload: unknown): ReadableLogField[] {
+  if (payload == null) return [];
+  if (typeof payload === "string") {
+    return [{ label: "详情", value: formatLogValue(payload) }];
+  }
+  if (Array.isArray(payload)) {
+    return [{ label: "详情", value: formatLogValue(payload) }];
+  }
+  const record = asRecord(payload);
+  if (!record) return [];
+  const keys = sortedLogKeys(record).slice(0, 8);
+  return keys.map((key) => ({
+    label: logFieldLabel(key),
+    value: formatLogValue(record[key], key),
+  }));
+}
+
+function toReadableChanges(before: unknown, after: unknown): ReadableLogChange[] {
+  const beforeRecord = asRecord(before);
+  const afterRecord = asRecord(after);
+  if (!beforeRecord || !afterRecord) return [];
+
+  const keySet = new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)]);
+  const keys = Array.from(keySet).sort((a, b) => {
+    const ai = LOG_FIELD_PRIORITY.indexOf(a);
+    const bi = LOG_FIELD_PRIORITY.indexOf(b);
+    const aScore = ai === -1 ? 999 : ai;
+    const bScore = bi === -1 ? 999 : bi;
+    if (aScore !== bScore) return aScore - bScore;
+    return a.localeCompare(b, "zh-CN");
+  });
+
+  const changes: ReadableLogChange[] = [];
+  for (const key of keys) {
+    const beforeText = formatLogValue(beforeRecord[key], key);
+    const afterText = formatLogValue(afterRecord[key], key);
+    if (beforeText === afterText) continue;
+    changes.push({
+      label: logFieldLabel(key),
+      before: beforeText,
+      after: afterText,
+    });
+    if (changes.length >= 8) break;
+  }
+  return changes;
+}
+
+function extractLogSubjectName(log: OperationLogEntry, actionKey: string, beforePayload: unknown, afterPayload: unknown): string {
+  const source = actionKey === "delete" ? (beforePayload ?? afterPayload) : (afterPayload ?? beforePayload);
+  const record = asRecord(source);
+  if (record) {
+    const nameCandidates = ["name", "studentName", "realName", "username", "studentNo", "code", "title", "groupName", "className"];
+    for (const key of nameCandidates) {
+      const text = formatLogValue(record[key], key);
+      if (text && text !== "空" && text !== "对象数据") {
+        return `「${text}」`;
+      }
+    }
+  }
+  const targetId = String(log.targetId || "").trim();
+  if (targetId) {
+    return `（ID：${shortId(targetId)}）`;
+  }
+  return "";
+}
+
+function resolveUpdateSummary(ctx: LogSummaryContext): string {
+  const { operator, targetLabel, subjectName, beforeRecord, afterRecord } = ctx;
+  const beforeLocked = parseBooleanValue(beforeRecord?.isLocked);
+  const afterLocked = parseBooleanValue(afterRecord?.isLocked);
+  if (beforeLocked !== null && afterLocked !== null && beforeLocked !== afterLocked) {
+    return `${operator}${afterLocked ? "锁定了" : "解锁了"}${targetLabel}${subjectName}`;
+  }
+
+  if (beforeRecord && afterRecord && beforeRecord.groupId !== undefined && afterRecord.groupId !== undefined && beforeRecord.groupId !== afterRecord.groupId) {
+    return `${operator}调整了${targetLabel}${subjectName}的所属分组`;
+  }
+  if (beforeRecord && afterRecord && beforeRecord.role !== undefined && afterRecord.role !== undefined && beforeRecord.role !== afterRecord.role) {
+    return `${operator}调整了${targetLabel}${subjectName}的角色权限`;
+  }
+  return `${operator}更新了${targetLabel}${subjectName}`;
+}
+
+function buildLogSummary(ctx: LogSummaryContext): string {
+  const templateKeys = [
+    `${ctx.moduleKey}:${ctx.actionKey}:${ctx.targetKey}`,
+    `${ctx.moduleKey}:${ctx.actionKey}`,
+    `${ctx.actionKey}:${ctx.targetKey}`,
+  ];
+  for (const key of templateKeys) {
+    const template = LOG_SUMMARY_TEMPLATES[key];
+    if (template) return template(ctx);
+  }
+
+  if (ctx.actionKey === "update") {
+    return resolveUpdateSummary(ctx);
+  }
+  if (ctx.actionKey === "create") return `${ctx.operator}创建了${ctx.targetLabel}${ctx.subjectName}`;
+  if (ctx.actionKey === "clone") return `${ctx.operator}复制了${ctx.targetLabel}${ctx.subjectName}`;
+  if (ctx.actionKey === "delete") return `${ctx.operator}删除了${ctx.targetLabel}${ctx.subjectName}`;
+  if (ctx.actionKey === "activate") return `${ctx.operator}将${ctx.targetLabel}${ctx.subjectName}设为当前活动`;
+  if (ctx.actionKey === "assign") return `${ctx.operator}分配了${ctx.targetLabel}${ctx.subjectName}`;
+  if (ctx.actionKey === "unassign") return `${ctx.operator}移除了${ctx.targetLabel}${ctx.subjectName}的分配关系`;
+
+  const subjectSuffix = ctx.subjectName ? `，对象：${ctx.targetLabel}${ctx.subjectName}` : "";
+  return `${ctx.operator}执行了${ctx.moduleLabel}模块的“${ctx.actionLabel}”操作${subjectSuffix}`;
+}
+
+const readableLogs = computed<ReadableLogItem[]>(() =>
+  logs.value.map((item: any) => {
+    const log = item as OperationLogEntry;
+    const moduleKey = normalizeModuleKey(log.module);
+    const actionKey = normalizeActionKey(log.action);
+    const targetKey = normalizeTargetKey(log.targetType);
+    const moduleLabel = LOG_MODULE_LABELS[moduleKey] || (log.module || "未知模块");
+    const actionLabel = LOG_ACTION_LABELS[actionKey] || (log.action || "未知操作");
+    const actionTagType = LOG_ACTION_TAG_TYPES[actionKey] || "info";
+    const targetLabel = LOG_TARGET_LABELS[targetKey] || (log.targetType || "对象");
+    const beforePayload = parseLogPayload(log.beforeData);
+    const afterPayload = parseLogPayload(log.afterData);
+    const beforeRecord = asRecord(beforePayload);
+    const afterRecord = asRecord(afterPayload);
+    const subjectName = extractLogSubjectName(log, actionKey, beforePayload, afterPayload);
+    const summary = buildLogSummary({
+      log,
+      operator: String(log.operatorName || "管理员").trim() || "管理员",
+      moduleKey,
+      actionKey,
+      targetKey,
+      moduleLabel,
+      actionLabel,
+      targetLabel,
+      subjectName,
+      beforeRecord,
+      afterRecord,
+    });
+    const changes = toReadableChanges(beforePayload, afterPayload);
+    const beforeFields = changes.length ? [] : toReadableFields(beforePayload);
+    const afterFields = changes.length ? [] : toReadableFields(afterPayload);
+
+    return {
+      id: log.id,
+      raw: log,
+      summary,
+      moduleLabel,
+      actionLabel,
+      actionTagType,
+      targetLabel,
+      operatorLabel: String(log.operatorName || "管理员"),
+      targetIdLabel: log.targetId ? shortId(String(log.targetId)) : "无",
+      beforeFields,
+      afterFields,
+      changes,
+    };
+  }),
+);
+
 const activityDialog = ref(false);
 const groupDialog = ref(false);
 const groupJudgeDialog = ref(false);
@@ -505,6 +1042,7 @@ bindSimpleModalHistory(customRoleDialog, "admin-custom-role-dialog");
 bindSimpleModalHistory(studentImportOpen, "admin-student-import-dialog");
 bindSimpleModalHistory(judgeImportOpen, "admin-judge-import-dialog");
 bindSimpleModalHistory(groupImportOpen, "admin-group-import-dialog");
+bindSimpleModalHistory(adminCameraOpen, "admin-artwork-camera-dialog");
 
 function openAnnouncementEditor(activity: Activity) {
   announcementEditId.value = activity.id;
@@ -597,6 +1135,7 @@ const studentForm = reactive({
   groupId: "",
   studentNo: "",
   name: "",
+  workName: "",
   gender: "",
   className: "",
   orderNo: 0,
@@ -748,6 +1287,7 @@ function resetStudentForm() {
     groupId: groups.value[0]?.id || "",
     studentNo: "",
     name: "",
+    workName: "",
     gender: "",
     className: "",
     orderNo: students.value.length + 1,
@@ -892,6 +1432,7 @@ function openEditStudent(student: Student) {
     groupId: student.groupId,
     studentNo: student.studentNo,
     name: student.name,
+    workName: student.workName || "",
     gender: student.gender || "",
     className: student.className || "",
     orderNo: student.orderNo,
@@ -1192,6 +1733,125 @@ function downloadQrcode(url: string, name: string) {
   link.href = url;
   link.download = `${name}-二维码.png`;
   link.click();
+}
+
+function triggerAdminArtworkUpload(studentId: string, mode: "camera" | "gallery" = "camera") {
+  if (mode === "camera") {
+    adminCameraStudentId.value = studentId;
+    adminCameraOpen.value = true;
+    return;
+  }
+  const input = document.getElementById(`admin-artwork-input-gal-${studentId}`) as HTMLInputElement | null;
+  if (input) {
+    input.value = "";
+    input.click();
+  }
+}
+
+async function handleAdminCameraCapture(blob: Blob) {
+  const studentId = adminCameraStudentId.value;
+  if (!studentId) return;
+  const student = students.value.find((item) => item.id === studentId);
+  if (!student) return;
+  const file = new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" });
+  try {
+    await uploadStudentArtwork(student, file);
+    adminCameraOpen.value = false;
+    adminCameraStudentId.value = null;
+  } catch {
+    // 上传失败时保持弹窗打开，方便重试
+  }
+}
+
+async function uploadStudentArtwork(student: Student, rawFile: File) {
+  if (!activityId.value || !isVotingMode.value) {
+    ElMessage.warning("仅投票模式可上传作品图");
+    return;
+  }
+  if (currentActivityLocked.value) {
+    ElMessage.warning("当前活动已锁定，只读");
+    return;
+  }
+  if (!rawFile?.type?.startsWith("image/")) {
+    ElMessage.warning("请上传图片文件");
+    return;
+  }
+
+  studentArtworkUploading[student.id] = true;
+  try {
+    const webpFile = await compressImageToWebp(rawFile, { targetMaxBytes: 200 * 1024, maxDimension: 1920 });
+    if (webpFile.size > 220 * 1024) {
+      ElMessage.warning("图片已压缩，但仍超过 200KB，系统将继续上传");
+    }
+    const formData = new FormData();
+    formData.append("file", webpFile);
+    const { data } = await api.post(`/api/admin/students/${student.id}/artworks`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    const incomingArtwork = data?.artwork as StudentArtwork | undefined;
+    students.value = students.value.map((item) => {
+      if (item.id !== student.id) return item;
+      const artworkMap = new Map<string, StudentArtwork>();
+      if (incomingArtwork?.id) {
+        artworkMap.set(incomingArtwork.id, incomingArtwork);
+      }
+      getStudentArtworks(item).forEach((art) => {
+        if (!artworkMap.has(art.id)) artworkMap.set(art.id, art);
+      });
+      const artworks = Array.from(artworkMap.values());
+      return {
+        ...item,
+        artworks,
+        artworkCount: typeof data?.artworkCount === "number" ? data.artworkCount : artworks.length,
+        canVote: typeof data?.canVote === "boolean" ? data.canVote : artworks.length > 0,
+      };
+    });
+    ElMessage.success("作品图上传成功");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || "作品图上传失败");
+  } finally {
+    studentArtworkUploading[student.id] = false;
+  }
+}
+
+async function onAdminArtworkInputChange(student: Student, event: Event) {
+  const input = event.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file) return;
+  await uploadStudentArtwork(student, file);
+  if (input) input.value = "";
+}
+
+async function deleteStudentArtwork(student: Student, artwork: StudentArtwork) {
+  if (!activityId.value || !isVotingMode.value) {
+    ElMessage.warning("仅投票模式可管理作品图");
+    return;
+  }
+  if (currentActivityLocked.value) {
+    ElMessage.warning("当前活动已锁定，只读");
+    return;
+  }
+
+  studentArtworkDeleting[artwork.id] = true;
+  try {
+    const { data } = await api.delete(`/api/admin/students/${student.id}/artworks/${artwork.id}`);
+    students.value = students.value.map((item) => {
+      if (item.id !== student.id) return item;
+      const artworks = getStudentArtworks(item).filter((entry) => entry.id !== artwork.id);
+      return {
+        ...item,
+        artworks,
+        artworkCount: typeof data?.artworkCount === "number" ? data.artworkCount : artworks.length,
+        canVote: typeof data?.canVote === "boolean" ? data.canVote : artworks.length > 0,
+      };
+    });
+    ElMessage.success("作品图已删除");
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || "删除作品图失败");
+  } finally {
+    studentArtworkDeleting[artwork.id] = false;
+  }
 }
 
 function handleSaveGroup() {
@@ -1835,7 +2495,7 @@ watch(
         return;
       }
 
-      if (event.type === "student.updated") {
+      if (event.type === "student.updated" || event.type === "student.artwork.updated") {
         await Promise.all([
           fetchStudentsOnly(),
           fetchResultsOnly(),
@@ -2341,6 +3001,13 @@ onUnmounted(() => {
           </div>
           <div class="toolbar admin-page-primary-actions">
             <el-button :icon="Upload" :disabled="currentActivityLocked" @click="studentImportOpen = true">导入学生</el-button>
+            <el-button
+              v-if="isVotingMode"
+              :disabled="!activityId"
+              @click="downloadFile(`/api/admin/activities/${activityId}/export/artworks`, `${currentActivity?.name || '活动'}-作品图.zip`)"
+            >
+              导出作品图ZIP
+            </el-button>
             <el-button type="primary" :icon="Plus" :disabled="currentActivityLocked" @click="openCreateStudent">新建学生</el-button>
           </div>
         </div>
@@ -2377,9 +3044,69 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="admin-activity-row-meta">
+                  <span class="work-name-pill" :class="{ 'is-empty': !(student.workName && student.workName.trim()) }">
+                    作品名：{{ student.workName && student.workName.trim() ? student.workName.trim() : "未填写作品名" }}
+                  </span>
                   <span>班级 {{ student.className || "未设置" }}</span>
                   <span>序号 {{ student.orderNo }}</span>
                   <span>完成度 {{ student.summary?.submittedJudgeCount || 0 }}/{{ student.summary?.requiredJudgeCount || 0 }}</span>
+                  <span v-if="isVotingMode">作品图 {{ getStudentArtworkCount(student) }}/5</span>
+                </div>
+                <div v-if="isVotingMode" class="admin-student-artwork-panel">
+                  <div class="admin-student-artwork-header">
+                    <span class="muted" v-if="!student.canVote">未上传作品图将无法投票</span>
+                    <span class="muted" v-else>已满足投票前置条件</span>
+                    <div class="admin-student-artwork-actions">
+                      <el-button
+                        size="small"
+                        type="primary"
+                        plain
+                        :icon="Camera"
+                        :disabled="currentActivityLocked || studentArtworkUploading[student.id]"
+                        :loading="studentArtworkUploading[student.id]"
+                        @click="triggerAdminArtworkUpload(student.id, 'camera')"
+                      >
+                        拍照
+                      </el-button>
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="currentActivityLocked || studentArtworkUploading[student.id]"
+                        @click="triggerAdminArtworkUpload(student.id, 'gallery')"
+                      >
+                        选图
+                      </el-button>
+                    </div>
+                    <input
+                      :id="`admin-artwork-input-gal-${student.id}`"
+                      accept="image/*"
+                      type="file"
+                      class="visually-hidden"
+                      @change="onAdminArtworkInputChange(student, $event)"
+                    />
+                  </div>
+                  <div v-if="!getStudentArtworks(student).length" class="muted admin-student-artwork-empty">暂无作品图</div>
+                  <div v-else class="admin-student-artwork-grid">
+                    <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="admin-student-artwork-item">
+                      <el-image
+                        :src="artwork.url"
+                        :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                        :initial-index="index"
+                        fit="cover"
+                        class="admin-student-artwork-image"
+                      />
+                      <el-button
+                        class="admin-student-artwork-delete"
+                        size="small"
+                        type="danger"
+                        plain
+                        :icon="Delete"
+                        :disabled="currentActivityLocked || studentArtworkDeleting[artwork.id]"
+                        :loading="studentArtworkDeleting[artwork.id]"
+                        @click="deleteStudentArtwork(student, artwork)"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2779,16 +3506,27 @@ onUnmounted(() => {
               <template v-else>
               <div v-for="row in paginatedResults" :key="row.id" class="glass-panel" style="padding: 16px; border-radius: 8px; position: relative; overflow: hidden;">
                 <div style="position: relative; z-index: 1;">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-                    <div>
-                      <div style="font-size: 18px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: baseline;">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 12px;">
+                    <div style="flex: 1; min-width: 0;">
+                      <div style="font-size: 18px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px;">
                         <span style="color: var(--el-color-primary); font-style: italic; margin-right: 8px; font-size: 24px; font-weight: 900;">#{{ row.rankNo }}</span>
                         {{ row.name }} <span style="font-size: 14px; font-weight: normal; color: var(--el-text-color-regular); margin-left: 6px;">({{ row.studentNo }})</span>
                       </div>
-                      <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                      <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
                         <el-tag size="small">{{ row.group?.name }}</el-tag>
                         <el-tag size="small" type="info">{{ row.className || "班级未知" }}</el-tag>
+                        <el-tag v-if="row.workName" size="small" type="warning" style="border-color: rgba(230,162,60,0.3); background: rgba(255,245,235,0.8);">
+                          <el-icon style="margin-right: 2px"><Document /></el-icon>{{ row.workName }}
+                        </el-tag>
                       </div>
+                    </div>
+                    <div v-if="row.artworks?.length" style="flex-shrink: 0; width: 80px; height: 60px; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.7); box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                      <el-image
+                        :src="row.artworks[0].url"
+                        :preview-src-list="row.artworks.map((a) => a.url)"
+                        fit="cover"
+                        style="width: 100%; height: 100%; cursor: pointer;"
+                      />
                     </div>
                   </div>
                   <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: rgba(255,255,255,0.4); backdrop-filter: blur(4px); padding: 12px; border-radius: 6px;">
@@ -2855,30 +3593,66 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="admin-activity-list">
-          <div v-for="log in logs" :key="log.id" class="glass-panel entity-card admin-activity-row">
+          <div v-for="entry in readableLogs" :key="entry.id" class="glass-panel entity-card admin-activity-row admin-log-row">
             <div class="admin-activity-row-main">
               <label class="admin-activity-row-check">
-                <el-checkbox :model-value="selectedLogIds.includes(log.id)" @change="(checked:boolean) => toggleLog(log.id, checked)" />
+                <el-checkbox :model-value="selectedLogIds.includes(entry.id)" @change="(checked:boolean) => toggleLog(entry.id, checked)" />
               </label>
               <div class="admin-activity-row-content">
                 <div class="admin-activity-row-top">
-                  <div class="admin-activity-row-title">
-                    <strong>{{ log.module }} / {{ log.action }}</strong>
-                    <div class="tag-row">
-                      <el-tag>{{ log.operatorName }}</el-tag>
-                      <el-tag>{{ log.targetType }}</el-tag>
-                      <el-tag type="success">{{ formatBJ(log.createdAt) }}</el-tag>
+                  <div class="admin-activity-row-title admin-log-title-wrap">
+                    <div class="admin-log-title-line">
+                      <strong class="admin-log-title">{{ entry.summary }}</strong>
+                      <el-tag size="small" effect="dark" :type="entry.actionTagType">{{ entry.actionLabel }}</el-tag>
+                    </div>
+                    <div class="tag-row admin-log-tags">
+                      <el-tag size="small">{{ entry.moduleLabel }}</el-tag>
+                      <el-tag size="small">{{ entry.targetLabel }}</el-tag>
+                      <el-tag size="small" type="info">操作人：{{ entry.operatorLabel }}</el-tag>
+                      <el-tag size="small" type="success">{{ formatBJ(entry.raw.createdAt) }}</el-tag>
                     </div>
                   </div>
                   <div class="admin-activity-row-actions">
-                    <el-button size="small" plain :icon="EditPen" @click="openEditLog(log)">编辑</el-button>
-                    <el-button size="small" plain type="danger" :icon="Delete" @click="deleteLog(log)">删除</el-button>
+                    <el-button size="small" plain :icon="EditPen" @click="openEditLog(entry.raw)">编辑</el-button>
+                    <el-button size="small" plain type="danger" :icon="Delete" @click="deleteLog(entry.raw)">删除</el-button>
                   </div>
                 </div>
-                <div class="admin-activity-row-meta">
-                  <span>目标 {{ log.targetType }} {{ log.targetId || "-" }}</span>
+                <div class="admin-activity-row-meta admin-log-meta">
+                  <span>目标ID：{{ entry.targetIdLabel }}</span>
                 </div>
-                <div class="muted admin-activity-row-desc">{{ log.afterData || log.beforeData || "暂无详情" }}</div>
+                <div class="admin-log-details">
+                  <div v-if="entry.changes.length" class="admin-log-block">
+                    <div class="admin-log-block-title">本次变更</div>
+                    <div class="admin-log-change-list">
+                      <div v-for="change in entry.changes" :key="change.label" class="admin-log-change-item">
+                        <span class="admin-log-change-key">{{ change.label }}</span>
+                        <span class="admin-log-change-before">{{ change.before }}</span>
+                        <span class="admin-log-change-arrow">→</span>
+                        <span class="admin-log-change-after">{{ change.after }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="admin-log-snapshot-grid">
+                    <div v-if="entry.afterFields.length" class="admin-log-block">
+                      <div class="admin-log-block-title">变更后</div>
+                      <div class="admin-log-kv-list">
+                        <div v-for="field in entry.afterFields" :key="`after-${entry.id}-${field.label}`" class="admin-log-kv-item">
+                          <span class="admin-log-kv-key">{{ field.label }}</span>
+                          <span class="admin-log-kv-value">{{ field.value }}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="entry.beforeFields.length" class="admin-log-block">
+                      <div class="admin-log-block-title">变更前</div>
+                      <div class="admin-log-kv-list">
+                        <div v-for="field in entry.beforeFields" :key="`before-${entry.id}-${field.label}`" class="admin-log-kv-item">
+                          <span class="admin-log-kv-key">{{ field.label }}</span>
+                          <span class="admin-log-kv-value">{{ field.value }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -3143,6 +3917,7 @@ onUnmounted(() => {
         </el-form-item>
         <el-form-item label="学号"><el-input v-model="studentForm.studentNo" /></el-form-item>
         <el-form-item label="姓名"><el-input v-model="studentForm.name" /></el-form-item>
+        <el-form-item label="作品名"><el-input v-model="studentForm.workName" placeholder="可选，不填则展示未填写作品名" /></el-form-item>
         <div class="compact-grid cols-2">
           <el-form-item label="性别"><el-input v-model="studentForm.gender" /></el-form-item>
           <el-form-item label="班级"><el-input v-model="studentForm.className" /></el-form-item>
@@ -3244,6 +4019,10 @@ onUnmounted(() => {
       sample-name="groups-template.xlsx"
       :disabled="currentActivityLocked"
       @success="fetchAll"
+    />
+    <CameraDialog
+      v-model="adminCameraOpen"
+      @capture="handleAdminCameraCapture"
     />
     </template>
   </AppShell>

@@ -608,6 +608,7 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
         groupId: true,
         studentNo: true,
         name: true,
+        workName: true,
         gender: true,
         className: true,
         orderNo: true,
@@ -616,6 +617,15 @@ export async function registerAdminUsersTemplateRoutes(app: FastifyInstance) {
             id: true,
             name: true,
           },
+        },
+        artworks: {
+          select: {
+            id: true,
+            url: true,
+            uploaderType: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: "desc" },
         },
       },
       orderBy: [{ group: { sortOrder: "asc" } }, { orderNo: "asc" }],

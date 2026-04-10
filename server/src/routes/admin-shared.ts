@@ -5,21 +5,36 @@ import { fileURLToPath } from "node:url";
 import { prisma } from "../db.js";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
-const serverDir = path.basename(path.resolve(__dir, "..")) === "dist"
-  ? path.resolve(__dir, "..", "..")
-  : path.resolve(__dir, "..");
+// admin-shared.ts is always at {src,dist}/routes/, so go up 2 levels to reach server root
+const serverDir = path.resolve(__dir, "..", "..");
 
 export const uploadsDir = path.resolve(serverDir, "uploads");
 if (!fsSync.existsSync(uploadsDir)) fsSync.mkdirSync(uploadsDir, { recursive: true });
 
+const UPLOAD_URL_PREFIX = "/api/uploads/";
+
+export function getUploadRelativePathFromUrl(url?: string | null) {
+  if (!url || !url.startsWith(UPLOAD_URL_PREFIX)) return null;
+  const relativePath = decodeURIComponent(url.slice(UPLOAD_URL_PREFIX.length)).replace(/\\/g, "/");
+  if (!relativePath) return null;
+  return relativePath;
+}
+
 export function getUploadFilenameFromUrl(url?: string | null) {
-  if (!url || !url.startsWith("/api/uploads/")) return null;
-  return path.basename(url);
+  const relativePath = getUploadRelativePathFromUrl(url);
+  if (!relativePath) return null;
+  return path.basename(relativePath);
 }
 
 export function resolveUploadPath(filename: string) {
   const filePath = path.resolve(uploadsDir, filename);
   return filePath.startsWith(uploadsDir) ? filePath : null;
+}
+
+export function resolveUploadPathFromUrl(url?: string | null) {
+  const relativePath = getUploadRelativePathFromUrl(url);
+  if (!relativePath) return null;
+  return resolveUploadPath(relativePath);
 }
 
 type AnnouncementFileMeta = {
