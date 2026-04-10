@@ -279,9 +279,10 @@ export function registerAdminExportRoutes(app: FastifyInstance) {
         const sheetRow = sheet.addRow(rowData);
         sheetRow.height = IMAGE_ROW_HEIGHT;
 
-        sheetRow.eachCell((cell) => {
+        sheetRow.eachCell((cell, colNumber) => {
           // 非图片列加上边框
-          const colKey = (sheet.columns![cell.col - 1] as ExcelJS.Column).key as string;
+          const column = sheet.columns?.[colNumber - 1] as ExcelJS.Column | undefined;
+          const colKey = typeof column?.key === "string" ? column.key : "";
           if (!colKey.startsWith("artwork")) {
             cell.border = {
               top: { style: "thin", color: { argb: "E4ECF8" } },
@@ -302,7 +303,7 @@ export function registerAdminExportRoutes(app: FastifyInstance) {
           if (!jpegBuffer) continue;
 
           const imageId = workbook.addImage({
-            buffer: jpegBuffer,
+            base64: `data:image/jpeg;base64,${jpegBuffer.toString("base64")}`,
             extension: "jpeg",
           });
 
