@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount } from "vue";
+import { nextTick, onBeforeUnmount, ref } from "vue";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -60,11 +60,7 @@ async function openCamera() {
       audio: false,
     };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
-    if (videoRef.value) {
-      videoRef.value.srcObject = stream;
-      await videoRef.value.play();
-    }
-    cameraState.value = "active";
+    await bindStreamToVideo(stream);
   } catch (err: any) {
     const name = err?.name;
     const isOverconstrained = name === "OverconstrainedError" || name === "ConstraintNotSatisfiedError";
@@ -77,11 +73,7 @@ async function openCamera() {
           video: { facingMode: { ideal: facingMode } },
           audio: false,
         });
-        if (videoRef.value) {
-          videoRef.value.srcObject = stream;
-          await videoRef.value.play();
-        }
-        cameraState.value = "active";
+        await bindStreamToVideo(stream);
         return;
       } catch (retryErr: any) {
         errorMsg.value = getErrorMessage(retryErr?.name, retryErr?.message);
@@ -93,6 +85,15 @@ async function openCamera() {
     errorMsg.value = getErrorMessage(name, err?.message);
     cameraState.value = "error";
   }
+}
+
+async function bindStreamToVideo(activeStream: MediaStream) {
+  cameraState.value = "active";
+  await nextTick();
+  const video = videoRef.value;
+  if (!video) throw new Error("视频预览节点未就绪");
+  video.srcObject = activeStream;
+  await video.play();
 }
 
 function stopCamera() {
