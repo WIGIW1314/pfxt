@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -16,6 +16,18 @@ const errorMsg = ref("");
 const switching = ref(false);
 const uploading = ref(false);
 const flashing = ref(false);
+type CameraMode = "1x" | "wide" | "front";
+const activeMode = ref<CameraMode>("1x");
+const wideKnownUnavailable = ref(false);
+const cameraDeviceMap = ref<Partial<Record<CameraMode, string>>>({});
+
+const lensOptions: Array<{ key: CameraMode; label: string }> = [
+  { key: "1x", label: "1x" },
+  { key: "wide", label: "广角" },
+  { key: "front", label: "前置" },
+];
+
+const wideDisabled = computed(() => wideKnownUnavailable.value);
 let stream: MediaStream | null = null;
 let facingMode: "environment" | "user" = "environment";
 
@@ -34,6 +46,93 @@ async function openPreferredCamera(mode: "environment" | "user") {
     video: buildVideoConstraints(mode),
     audio: false,
   });
+}
+
+function scoreRearMainLabel(label: string): number {
+  const text = label.toLowerCase();
+  let score = 0;
+  if (/(back|rear|environment|后置|后摄|主摄)/.test(text)) score += 50;
+  if (/(main|1x|standard|标准)/.test(text)) score += 30;
+  if (/(ultra|wide|广角|0\.5x|0\.6x)/.test(text)) score -= 40;
+  if (/(tele|zoom|长焦|2x|3x|5x)/.test(text)) score -= 60;
+  if (/(front|user|前置|前摄)/.test(text)) score -= 100;
+  return score;
+}
+
+function scoreRearWideLabel(label: string): number {
+  const text = label.toLowerCase();
+  let score = 0;
+  if (/(back|rear|environment|后置|后摄)/.test(text)) score += 40;
+  if (/(ultra|wide|广角|0\.5x|0\.6x)/.test(text)) score += 60;
+  if (/(tele|zoom|长焦|2x|3x|5x)/.test(text)) score -= 90;
+  if (/(front|user|前置|前摄)/.test(text)) score -= 100;
+  return score;
+}
+
+function scoreFrontLabel(label: string): number {
+  const text = label.toLowerCase();
+  let score = 0;
+  if (/(front|user|前置|前摄)/.test(text)) score += 80;
+  if (/(back|rear|environment|后置|后摄)/.test(text)) score -= 100;
+  return score;
+}
+
+function updateCameraMapFromDevices(devices: MediaDeviceInfo[]) {
+  const cameras = devices.filter((d) => d.kind === "videoinput");
+  if (!cameras.length) return;
+
+  const pickBest = (scorer: (label: string) => number, minScore = -9999) =>
+    [...cameras]
+      .map((d) => ({ d, score: scorer(d.label || "") }))
+      .sort((a, b) => b.score - a.score)
+      .find((item) => item.score > minScore)?.d;
+
+  const rearMain = pickBest(scoreRearMainLabel);
+  const rearWide = pickBest(scoreRearWideLabel, 10);
+  const front = pickBest(scoreFrontLabel);
+  const hasLabeledRear = cameras.some((d) => /(back|rear|environment|后置|后摄)/.test((d.label || "").toLowerCase()));
+
+  cameraDeviceMap.value = {
+    "1x": rearMain?.deviceId || cameraDeviceMap.value["1x"],
+    wide: rearWide?.deviceId || undefined,
+    front: front?.deviceId || cameraDeviceMap.value.front,
+  };
+  wideKnownUnavailable.value = hasLabeledRear && !rearWide?.deviceId;
+}
+
+async function openCameraByMode(mode: CameraMode): Promise<MediaStream> {
+  const requestedFacing: "environment" | "user" = mode === "front" ? "user" : "environment";
+  const initial = await openPreferredCamera(requestedFacing);
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  updateCameraMapFromDevices(devices);
+
+  const targetDeviceId = cameraDeviceMap.value[mode];
+  if (!targetDeviceId) {
+    return initial;
+  }
+
+  const currentTrack = initial.getVideoTracks()[0];
+  const currentDeviceId = (currentTrack?.getSettings?.().deviceId as string | undefined) || "";
+  if (targetDeviceId === currentDeviceId) {
+    return initial;
+  }
+
+  try {
+    const exact = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: { exact: targetDeviceId },
+        width: { ideal: 1600 },
+        height: { ideal: 1200 },
+        aspectRatio: { ideal: 4 / 3 },
+      },
+      audio: false,
+    });
+    initial.getTracks().forEach((t) => t.stop());
+    return exact;
+  } catch {
+    return initial;
+  }
 }
 
 function getErrorMessage(name: string | undefined, msg?: string): string {
@@ -60,10 +159,11 @@ function getErrorMessage(name: string | undefined, msg?: string): string {
   }
 }
 
-async function openCamera() {
+async function openCamera(mode: CameraMode = activeMode.value) {
   stopCamera();
   cameraState.value = "starting";
   errorMsg.value = "";
+  facingMode = mode === "front" ? "user" : "environment";
 
   if (!navigator.mediaDevices?.getUserMedia) {
     errorMsg.value = "此功能需要 HTTPS 环境才能使用";
@@ -72,7 +172,8 @@ async function openCamera() {
   }
 
   try {
-    stream = await openPreferredCamera(facingMode);
+    stream = await openCameraByMode(mode);
+    activeMode.value = mode;
     await bindStreamToVideo(stream);
   } catch (err: any) {
     const name = err?.name;
@@ -82,7 +183,8 @@ async function openCamera() {
     if (isOverconstrained && facingMode === "environment") {
       facingMode = "user";
       try {
-        stream = await openPreferredCamera(facingMode);
+        stream = await openCameraByMode("front");
+        activeMode.value = "front";
         await bindStreamToVideo(stream);
         return;
       } catch (retryErr: any) {
@@ -157,11 +259,12 @@ function takePhoto() {
   );
 }
 
-async function switchCamera() {
-  if (switching.value) return;
+async function selectMode(mode: CameraMode) {
+  if (mode === "wide" && wideDisabled.value) return;
+  if (mode === activeMode.value && cameraState.value === "active") return;
+  if (switching.value || uploading.value) return;
   switching.value = true;
-  facingMode = facingMode === "environment" ? "user" : "environment";
-  await openCamera();
+  await openCamera(mode);
   switching.value = false;
 }
 
@@ -174,7 +277,8 @@ function onDialogOpen() {
   cameraState.value = "idle";
   errorMsg.value = "";
   uploading.value = false;
-  openCamera();
+  activeMode.value = "1x";
+  openCamera("1x");
 }
 
 function onDialogClose() {
@@ -214,10 +318,18 @@ onBeforeUnmount(() => {
 
         <!-- 工具栏 -->
         <div class="camera-toolbar-overlay">
-          <el-button text class="camera-toolbar-btn" @click="switchCamera" :loading="switching">
-            <el-icon :size="18"><RefreshRight /></el-icon>
-            <span style="margin-left: 4px">翻转</span>
-          </el-button>
+          <div class="camera-lens-group">
+            <el-button
+              v-for="item in lensOptions"
+              :key="item.key"
+              class="camera-lens-btn"
+              :class="{ 'is-active': activeMode === item.key }"
+              :disabled="(item.key === 'wide' && wideDisabled) || switching || uploading"
+              @click="selectMode(item.key)"
+            >
+              {{ item.label }}
+            </el-button>
+          </div>
         </div>
 
         <!-- 拍照按钮 -->
@@ -407,13 +519,34 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   z-index: 3;
 }
 
-.camera-toolbar-btn.el-button {
-  min-height: 28px !important;
-  padding: 0 8px !important;
-  border-radius: 999px !important;
-  background: rgba(0, 0, 0, 0.36) !important;
-  color: #fff !important;
+.camera-lens-group {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(4px);
+}
+
+.camera-lens-btn.el-button {
+  min-height: 30px !important;
+  min-width: 54px;
+  padding: 0 10px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  background: rgba(0, 0, 0, 0.18) !important;
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-size: 13px;
+}
+
+.camera-lens-btn.el-button.is-active {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: rgba(255, 255, 255, 0.94) !important;
+  color: #111 !important;
+}
+
+.camera-lens-btn.el-button.is-disabled {
+  opacity: 0.45;
 }
 
 :deep(.camera-dialog-force-full.el-dialog) {
