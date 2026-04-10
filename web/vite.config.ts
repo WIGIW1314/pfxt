@@ -30,6 +30,9 @@ export default defineConfig({
       "axios",
     ],
   },
+  esbuild: {
+    drop: ["console", "debugger"],
+  },
   build: {
     cssMinify: "esbuild",
     rollupOptions: {

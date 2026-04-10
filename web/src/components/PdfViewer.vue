@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick, computed } from 'vue'
+import { ElProgress } from 'element-plus'
 
 const props = defineProps<{
   url: string
@@ -9,23 +10,38 @@ const container = ref<HTMLDivElement | null>(null)
 const totalPages = ref(0)
 const loading = ref(false)
 const error = ref('')
+const loadingPhase = ref<'init' | 'doc' | 'pages'>('init')
+const loadingPage = ref(0)
 let pdfDoc: any = null
 let destroyed = false
+
+const loadingText = computed(() => {
+  if (loadingPhase.value === 'init') return '正在初始化…'
+  if (loadingPhase.value === 'doc') return '正在解析文档…'
+  if (totalPages.value > 0) return `正在渲染第 ${loadingPage.value}/${totalPages.value} 页`
+  return 'PDF 加载中…'
+})
+
+const progressPercent = computed(() => {
+  if (totalPages.value > 0 && loadingPage.value > 0) {
+    return Math.round((loadingPage.value / totalPages.value) * 100)
+  }
+  return null
+})
 
 async function loadPdf() {
   if (!props.url) return
   loading.value = true
   error.value = ''
   totalPages.value = 0
+  loadingPage.value = 0
+  loadingPhase.value = 'init'
 
   try {
-    // Dynamic import to keep it out of the main bundle
     const pdfjsLib = await import('pdfjs-dist')
     if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        'pdfjs-dist/build/pdf.worker.min.mjs',
-        import.meta.url,
-      ).href
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs'
     }
 
     if (pdfDoc) {
@@ -38,6 +54,7 @@ async function loadPdf() {
     if (!el) return
     el.innerHTML = ''
 
+    loadingPhase.value = 'doc'
     const loadingTask = pdfjsLib.getDocument({ url: props.url })
     pdfDoc = await loadingTask.promise
 
@@ -49,10 +66,11 @@ async function loadPdf() {
 
     const dpr = window.devicePixelRatio || 1
 
+    loadingPhase.value = 'pages'
     for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
       if (destroyed) break
+      loadingPage.value = pageNum
       const page = await pdfDoc.getPage(pageNum)
-      // Use container width to scale PDF to fit
       const containerWidth = containerEl.clientWidth || 700
       const unscaledViewport = page.getViewport({ scale: 1 })
       const scale = containerWidth / unscaledViewport.width
@@ -80,7 +98,10 @@ async function loadPdf() {
       error.value = e.message || 'PDF 加载失败'
     }
   } finally {
-    if (!destroyed) loading.value = false
+    if (!destroyed) {
+      loading.value = false
+      loadingPage.value = 0
+    }
   }
 }
 
@@ -103,15 +124,25 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="pdf-viewer">
-    <div v-if="loading" class="pdf-viewer-status">
-      <span class="pdf-viewer-spin"></span>
-      <span>PDF 加载中…</span>
+    <!-- Loading state with progress -->
+    <div v-if="loading" class="pdf-viewer-loading">
+      <div class="pdf-viewer-spin"></div>
+      <span class="pdf-viewer-status-text">{{ loadingText }}</span>
+      <ElProgress
+        v-if="progressPercent !== null"
+        :percentage="progressPercent"
+        :show-text="false"
+        :stroke-width="3"
+        class="pdf-viewer-progress"
+      />
     </div>
-    <div v-if="error" class="pdf-viewer-status pdf-viewer-error">
+    <!-- Error state -->
+    <div v-else-if="error" class="pdf-viewer-status pdf-viewer-error">
       <span>⚠ {{ error }}</span>
       <a :href="url" target="_blank" class="pdf-fallback-link">点击直接打开</a>
     </div>
-    <div v-if="!loading && !error && totalPages > 0" class="pdf-page-count">
+    <!-- Success state -->
+    <div v-else-if="!loading && !error && totalPages > 0" class="pdf-page-count">
       共 {{ totalPages }} 页
     </div>
     <div ref="container" class="pdf-canvas-container" />
@@ -121,6 +152,38 @@ onBeforeUnmount(() => {
 <style scoped>
 .pdf-viewer {
   width: 100%;
+}
+
+.pdf-viewer-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 0;
+}
+
+.pdf-viewer-spin {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--el-color-primary-light-5, #a0cfff);
+  border-top-color: var(--el-color-primary, #409eff);
+  border-radius: 50%;
+  animation: pdf-spin 0.7s linear infinite;
+}
+
+@keyframes pdf-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pdf-viewer-status-text {
+  font-size: 13px;
+  color: var(--muted, #999);
+  text-align: center;
+}
+
+.pdf-viewer-progress {
+  width: 160px;
 }
 
 .pdf-viewer-status {
@@ -134,21 +197,6 @@ onBeforeUnmount(() => {
 
 .pdf-viewer-error {
   color: var(--el-color-danger, #f56c6c);
-}
-
-.pdf-viewer-spin {
-  display: inline-block;
-  width: 16px;
-  height: 16px;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: pdf-spin 0.7s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes pdf-spin {
-  to { transform: rotate(360deg); }
 }
 
 .pdf-fallback-link {

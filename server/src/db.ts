@@ -61,6 +61,28 @@ function resolveSqlitePath() {
 
 export const prisma = new PrismaClient();
 
+// --- SQLite performance: WAL mode + busy_timeout ---
+void prisma.$executeRawUnsafe(`PRAGMA journal_mode=WAL;`).catch(() => {});
+void prisma.$executeRawUnsafe(`PRAGMA busy_timeout=5000;`).catch(() => {});
+void prisma.$executeRawUnsafe(`PRAGMA synchronous=NORMAL;`).catch(() => {});
+
+// --- Slow query logging ---
+const SLOW_QUERY_THRESHOLD = 100; // ms
+prisma.$extends({
+  name: "slow-query-log",
+  query: {
+    async $allOperations({ operation, model, args, query }) {
+      const start = Date.now();
+      const result = await query(args);
+      const duration = Date.now() - start;
+      if (duration > SLOW_QUERY_THRESHOLD) {
+        console.warn(`[SLOW QUERY] ${duration}ms - ${model}.${operation}`);
+      }
+      return result;
+    },
+  },
+});
+
 export async function ensureRuntimeSchema() {
   const sqlitePath = resolveSqlitePath();
   if (sqlitePath) {
@@ -116,6 +138,9 @@ export async function ensureRuntimeSchema() {
   }
   if (!groupColNames.has("qrcodeUrl")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "Group" ADD COLUMN "qrcodeUrl" TEXT;`);
+  }
+  if (!groupColNames.has("qrcodeMeta")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Group" ADD COLUMN "qrcodeMeta" TEXT;`);
   }
 
   // ActivityCustomRole 表
@@ -186,4 +211,10 @@ export async function ensureRuntimeSchema() {
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_score_activity_student_status" ON "Score"("activityId", "studentId", "status");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_score_activity_judge_status" ON "Score"("activityId", "judgeUserId", "status");`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_operation_log_created_at" ON "OperationLog"("createdAt");`);
+  // Additional indexes for high-concurrency scoring scenarios
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_score_groupId" ON "Score"("groupId");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_score_templateId" ON "Score"("templateId");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_student_activityId" ON "Student"("activityId");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_group_activityId" ON "Group"("activityId");`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_user_role" ON "User"("role");`);
 }

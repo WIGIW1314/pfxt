@@ -38,6 +38,7 @@ const savedRowSignatures = reactive<Record<string, string>>({});
 const compactScoreTable = computed(() => window.innerWidth < 768);
 const batchLoading = ref<"" | "save-draft" | "submit-score" | "reset-score">("");
 const rowCommentLoading = reactive<Record<string, boolean>>({});
+const pageLoading = ref(true);
 const exportProgress = reactive({
   visible: false,
   title: "",
@@ -141,6 +142,18 @@ const hasPendingSubmission = computed(() =>
   students.value.some((student) => student.myScoreStatus === "DRAFT") || hasUnsavedChanges.value,
 );
 
+// 活动类型切换时自动跳转：投票 ↔ 评分页面
+watch(
+  [() => isVotingMode.value, section],
+  ([voting, sec]) => {
+    if (voting && sec === "score") {
+      router.push("/judge/voting");
+    } else if (!voting && sec === "voting") {
+      router.push("/judge/home");
+    }
+  },
+);
+
 function buildRowSignature(studentId: string) {
   const row = rowForms[studentId];
   const detailSignature = isTotalOnly.value
@@ -234,22 +247,26 @@ async function fetchJudgeRows(currentActivityId: string) {
 }
 
 async function fetchJudgeData(options?: { refreshBinding?: boolean }) {
-  if (options?.refreshBinding !== false) {
-    await fetchCurrentBinding();
+  try {
+    if (options?.refreshBinding !== false) {
+      await fetchCurrentBinding();
+    }
+
+    const currentActivityId = currentActivity.value?.activity?.id || "";
+
+    if (!currentActivityId) {
+      currentStudent.value = null;
+      peerStudent.value = null;
+      students.value = [];
+      progress.value = { total: 0, submitted: 0, draft: 0, pending: 0 };
+      syncRowForms();
+      return;
+    }
+
+    await fetchJudgeRows(currentActivityId);
+  } finally {
+    pageLoading.value = false;
   }
-
-  const currentActivityId = currentActivity.value?.activity?.id || "";
-
-  if (!currentActivityId) {
-    currentStudent.value = null;
-    peerStudent.value = null;
-    students.value = [];
-    progress.value = { total: 0, submitted: 0, draft: 0, pending: 0 };
-    syncRowForms();
-    return;
-  }
-
-  await fetchJudgeRows(currentActivityId);
 }
 
 async function openScore(student: Student) {
@@ -557,6 +574,11 @@ async function saveBatch(endpoint: "save-draft" | "submit-score") {
         : `已保存 ${targetStudents.length} 行草稿`,
     );
 
+    // Haptic feedback for batch operations
+    if (navigator.vibrate) {
+      navigator.vibrate([30, 50, 30]);
+    }
+
     // Refresh progress counter in background (non-blocking)
     void api.get(`/api/judge/activities/${activityId.value}/progress`).then(({ data: prog }) => {
       progress.value = prog;
@@ -572,6 +594,11 @@ async function handleSingleScoreSuccess() {
   const student = currentStudent.value;
   if (!student) return;
   const sid = student.id;
+
+  // Haptic feedback on supported devices
+  if (navigator.vibrate) {
+    navigator.vibrate(50);
+  }
 
   try {
     // Quick async progress refresh
@@ -845,6 +872,17 @@ onBeforeRouteUpdate(async () => {
     title="移动评分现场端"
     :subtitle="`${currentActivity?.activity?.name || '未绑定活动'} · ${currentActivity?.group?.name || '未分组'}`"
   >
+    <!-- 加载骨架屏 -->
+    <div v-if="pageLoading" class="judge-skeleton">
+      <div class="glass-panel judge-skeleton-card">
+        <el-skeleton :rows="3" animated style="padding: 8px 0" />
+      </div>
+      <div class="glass-panel judge-skeleton-card">
+        <el-skeleton :rows="5" animated style="padding: 8px 0" />
+      </div>
+    </div>
+
+    <template v-else>
     <section v-if="isLocked" class="readonly-banner judge-lock-banner">
       <el-icon><Lock /></el-icon>
       <span>{{ lockReason }}，只读，评委不可再保存或提交评分</span>
@@ -937,6 +975,7 @@ onBeforeRouteUpdate(async () => {
             :src="currentActivity.group.qrcodeUrl"
             :preview-src-list="[currentActivity.group.qrcodeUrl]"
             fit="contain"
+            loading="lazy"
             style="width: 200px; height: 200px; border-radius: 8px; border: 1px solid var(--el-border-color-lighter); cursor: pointer"
           />
           <el-button size="small" text type="primary" style="margin-top: 6px" @click="downloadQrcode(currentActivity.group!.qrcodeUrl!, currentActivity.group?.name || '分组')">下载二维码</el-button>
@@ -1395,10 +1434,21 @@ onBeforeRouteUpdate(async () => {
         </div>
       </div>
     </el-dialog>
+    </template>
   </AppShell>
 </template>
 
 <style scoped>
+.judge-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+.judge-skeleton-card {
+  padding: 20px;
+}
+
 .student-card-name-row {
   display: flex;
   align-items: center;

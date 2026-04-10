@@ -113,6 +113,7 @@ model Group {
   startTime     DateTime?
   endTime       DateTime?
   qrcodeUrl     String?
+  qrcodeMeta    String?            // JSON: {thumb, medium, original} URLs
   note          String?
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt

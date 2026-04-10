@@ -38,14 +38,14 @@ async function submit() {
         <h1 class="login-title">{{ sync.siteTitle }}</h1>
       </div>
 
-      <el-form label-position="top" @submit.prevent="submit">
+      <el-form label-position="top" @submit.prevent="submit" aria-label="登录表单">
         <el-form-item label="用户名">
-          <el-input v-model="form.username" placeholder="请输入账号" autofocus :prefix-icon="User" />
+          <el-input v-model="form.username" placeholder="请输入账号" autofocus :prefix-icon="User" aria-required="true" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" :prefix-icon="Lock" />
+          <el-input v-model="form.password" type="password" show-password placeholder="请输入密码" :prefix-icon="Lock" aria-required="true" />
         </el-form-item>
-        <el-button type="primary" class="login-submit" :loading="loading" @click="submit">登录</el-button>
+        <el-button type="primary" class="login-submit" :loading="loading" aria-label="登录" @click="submit">登录</el-button>
       </el-form>
 
       <div class="login-home-wrap">

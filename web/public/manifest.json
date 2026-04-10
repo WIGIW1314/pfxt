@@ -1,0 +1,30 @@
+{
+  "name": "线上评分系统",
+  "short_name": "评分系统",
+  "description": "专业线上评分管理平台",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef3ff",
+  "theme_color": "#409eff",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["productivity", "education"],
+  "lang": "zh-CN"
+}

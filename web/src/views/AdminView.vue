@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage, ElMessageBox, ElSkeleton } from "element-plus";
 import { Checked, Collection, Connection, Delete, EditPen, Histogram, Lock, Plus, RefreshRight, Search, Setting, Top, Upload, UserFilled } from "@element-plus/icons-vue";
 import AppShell from "../components/AppShell.vue";
-import { api, downloadFile } from "../api";
+import { api, downloadFile, invalidateCache, uploadQrcode } from "../api";
 import { useAuthStore } from "../stores/auth";
 import { formatBJ } from "../date";
 import { useSyncStore } from "../stores/sync";
@@ -587,6 +587,8 @@ const groupForm = reactive({
   startTime: "",
   endTime: "",
   qrcodeUrl: "",
+  // Stores processed variant URLs as JSON string for server storage
+  qrcodeMeta: null as string | null,
 });
 
 const studentForm = reactive({
@@ -734,6 +736,7 @@ function resetGroupForm() {
     startTime: "",
     endTime: "",
     qrcodeUrl: "",
+    qrcodeMeta: null,
   });
 }
 
@@ -871,6 +874,7 @@ function openEditGroup(group: Group) {
     startTime: group.startTime ? formatBJ(group.startTime, "YYYY-MM-DDTHH:mm:ss") : "",
     endTime: group.endTime ? formatBJ(group.endTime, "YYYY-MM-DDTHH:mm:ss") : "",
     qrcodeUrl: group.qrcodeUrl || "",
+    qrcodeMeta: group.qrcodeMeta ? JSON.stringify(group.qrcodeMeta) : null,
   });
   groupDialog.value = true;
 }
@@ -942,7 +946,8 @@ async function changeCurrentActivity(nextActivityId: string) {
     dashboardActivityId.value = nextActivityId;
     localStorage.setItem(ADMIN_DASHBOARD_ACTIVITY_KEY, nextActivityId);
     await auth.fetchMe();
-    sync.fetchSiteTitle();
+    invalidateCache("/api/meta/active-title");
+    await sync.fetchSiteTitle();
     await fetchAll();
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.message || "切换活动失败，请稍后重试");
@@ -1157,18 +1162,27 @@ async function createActivity() {
   }
 }
 
-function handleQrcodeUpload(uploadFile: any) {
-  const file = uploadFile.raw || uploadFile;
+const qrcodeUploading = ref(false);
+
+async function handleQrcodeUpload(uploadFile: any) {
+  const file: File = uploadFile.raw || uploadFile;
   if (!file) return;
   if (file.size > 2 * 1024 * 1024) {
     ElMessage.warning("图片大小不能超过 2MB");
     return;
   }
-  const reader = new FileReader();
-  reader.onload = () => {
-    groupForm.qrcodeUrl = reader.result as string;
-  };
-  reader.readAsDataURL(file);
+  try {
+    qrcodeUploading.value = true;
+    const result = await uploadQrcode(file);
+    // Store the medium URL as the primary display URL
+    groupForm.qrcodeUrl = result.medium;
+    // Store the full meta as JSON string for the server
+    groupForm.qrcodeMeta = JSON.stringify(result.meta);
+  } catch {
+    ElMessage.error("二维码上传失败，请重试");
+  } finally {
+    qrcodeUploading.value = false;
+  }
 }
 
 function downloadQrcode(url: string, name: string) {
@@ -1926,9 +1940,26 @@ onUnmounted(() => {
   >
     <template #extra>
       <el-button class="topbar-action-button topbar-password-button" plain @click="openPasswordDialog">
-        <el-icon><Lock /></el-icon> 
+        <el-icon><Lock /></el-icon>
       </el-button>
     </template>
+
+    <!-- 加载骨架屏 -->
+    <div v-if="loading" class="admin-skeleton glass-panel">
+      <div class="admin-skeleton-header">
+        <el-skeleton :rows="1" animated style="padding: 4px 0" />
+      </div>
+      <div class="admin-skeleton-content">
+        <div class="admin-skeleton-sidebar">
+          <el-skeleton :rows="6" animated />
+        </div>
+        <div class="admin-skeleton-main">
+          <el-skeleton :rows="8" animated />
+        </div>
+      </div>
+    </div>
+
+    <template v-else>
       <el-dialog v-model="passwordDialog" title="修改密码" width="350px" :close-on-click-modal="false">
         <el-form @submit.prevent="submitPasswordChange">
           <el-form-item label="旧密码">
@@ -2283,6 +2314,7 @@ onUnmounted(() => {
                     :src="group.qrcodeUrl"
                     :preview-src-list="[group.qrcodeUrl]"
                     fit="contain"
+                    loading="lazy"
                     style="width: 80px; height: 80px; border-radius: 4px; border: 1px solid var(--el-border-color-lighter); cursor: pointer"
                   />
                   <div style="display: flex; align-items: center; gap: 6px">
@@ -2857,7 +2889,7 @@ onUnmounted(() => {
         <el-form-item label="活动名称"><el-input v-model="activityForm.name" /></el-form-item>
         <el-form-item label="活动编码"><el-input v-model="activityForm.code" /></el-form-item>
         <el-form-item label="活动类型">
-          <el-select v-model="activityForm.type" placeholder="选择活动类型">
+          <el-select v-model="activityForm.type" placeholder="选择活动类型" filterable allow-create default-first-option>
             <el-option label="微格教学" value="微格教学" />
             <el-option label="教学评价" value="教学评价" />
             <el-option label="面试评分" value="面试评分" />
@@ -3050,15 +3082,18 @@ onUnmounted(() => {
               accept="image/*"
               @change="handleQrcodeUpload"
             >
-              <el-button size="small" type="primary" plain>选择图片</el-button>
+              <el-button size="small" type="primary" plain :loading="qrcodeUploading">
+                {{ qrcodeUploading ? '处理中...' : '选择图片' }}
+              </el-button>
             </el-upload>
-            <el-button v-if="groupForm.qrcodeUrl" size="small" text type="danger" @click="groupForm.qrcodeUrl = ''">清除</el-button>
+            <el-button v-if="groupForm.qrcodeUrl" size="small" text type="danger" @click="groupForm.qrcodeUrl = ''; groupForm.qrcodeMeta = null">清除</el-button>
           </div>
           <el-image
             v-if="groupForm.qrcodeUrl"
             :src="groupForm.qrcodeUrl"
             :preview-src-list="[groupForm.qrcodeUrl]"
             fit="contain"
+            loading="lazy"
             style="width: 120px; height: 120px; margin-top: 8px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter)"
           />
         </el-form-item>
@@ -3208,10 +3243,30 @@ onUnmounted(() => {
       :disabled="currentActivityLocked"
       @success="fetchAll"
     />
+    </template>
   </AppShell>
 </template>
 
 <style scoped>
+.admin-skeleton {
+  padding: 20px;
+}
+.admin-skeleton-header {
+  margin-bottom: 16px;
+}
+.admin-skeleton-content {
+  display: flex;
+  gap: 16px;
+}
+.admin-skeleton-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+}
+.admin-skeleton-main {
+  flex: 1;
+  min-width: 0;
+}
+
 .admin-results-panel {
   padding: 10px 12px 12px;
   display: flex;

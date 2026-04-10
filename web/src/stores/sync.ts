@@ -1,7 +1,7 @@
 import { ref } from "vue";
 import { defineStore } from "pinia";
 import { useAuthStore } from "./auth";
-import { API_BASE } from "../api";
+import { API_BASE, cachedGet } from "../api";
 
 export const useSyncStore = defineStore("sync", () => {
   const version = ref(0);
@@ -32,14 +32,13 @@ export const useSyncStore = defineStore("sync", () => {
   let socket: WebSocket | null = null;
   let heartbeatTimer: number | null = null;
   let shouldReconnect = true;
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_DELAY = 30_000;
 
   async function fetchSiteTitle() {
     try {
-      const res = await fetch(`${API_BASE}/api/meta/active-title`);
-      if (res.ok) {
-        const data = await res.json();
-        siteTitle.value = data.title || "线上评分系统";
-      }
+      const data = await cachedGet<{ title?: string }>("/api/meta/active-title", 60_000);
+      siteTitle.value = data.title || "线上评分系统";
     } catch {
       // keep default title on network error
     }
@@ -47,14 +46,12 @@ export const useSyncStore = defineStore("sync", () => {
 
   async function pingPresence() {
     const auth = useAuthStore();
-    if (!auth.token) return;
+    if (!auth.user) return;
     try {
       await fetch(`${API_BASE}/api/presence/ping`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${auth.token}`,
-        },
+        credentials: "include", // Send httpOnly cookie
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           activityId: auth.currentActivityRole?.activityId || null,
           groupId: auth.currentActivityRole?.groupId || null,
@@ -67,13 +64,11 @@ export const useSyncStore = defineStore("sync", () => {
 
   async function markOffline() {
     const auth = useAuthStore();
-    if (!auth.token) return;
+    if (!auth.user) return;
     try {
       await fetch(`${API_BASE}/api/presence/offline`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${auth.token}`,
-        },
+        credentials: "include", // Send httpOnly cookie
         keepalive: true,
       });
     } catch {
@@ -96,20 +91,22 @@ export const useSyncStore = defineStore("sync", () => {
 
   function connect() {
     const auth = useAuthStore();
-    if (!auth.token || socket) return;
+    if (!auth.user || socket) return;
     shouldReconnect = true;
     const wsBase = API_BASE.replace(/^http/, "ws");
     const params = new URLSearchParams({
-      token: auth.token,
       activityId: auth.currentActivityRole?.activityId || "",
       groupId: auth.currentActivityRole?.groupId || "",
     });
+    // Cookie (httpOnly) is sent automatically by the browser
     socket = new WebSocket(`${wsBase}/ws?${params.toString()}`);
+    reconnectAttempts = 0; // Reset backoff on successful connection attempt
     pingPresence();
     if (heartbeatTimer) {
       window.clearInterval(heartbeatTimer);
     }
-    heartbeatTimer = window.setInterval(pingPresence, 10_000);
+    // 30s heartbeat interval reduces unnecessary requests (was 10s)
+    heartbeatTimer = window.setInterval(pingPresence, 30_000);
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data);
       latestEvent.value = payload;
@@ -123,7 +120,10 @@ export const useSyncStore = defineStore("sync", () => {
     socket.onclose = () => {
       socket = null;
       if (shouldReconnect) {
-        window.setTimeout(connect, 1500);
+        // Exponential backoff: 1.5s, 3s, 6s, 12s, 24s, 30s (max)
+        reconnectAttempts++;
+        const delay = Math.min(1500 * Math.pow(2, reconnectAttempts - 1), MAX_RECONNECT_DELAY);
+        window.setTimeout(connect, delay);
       }
     };
   }

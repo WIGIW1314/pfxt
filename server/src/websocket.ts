@@ -38,7 +38,9 @@ function notifyPublicClients(event: string) {
 export function registerWsRoute(app: FastifyInstance) {
   app.get("/ws", { websocket: true }, async (connection, request) => {
     const query = request.query as { token?: string; activityId?: string; groupId?: string };
-    const token = query.token;
+
+    // Primary: httpOnly cookie; Fallback: query param (backward compat)
+    const token = request.cookies?.["score-system-token"] || query.token;
     if (!token) {
       connection.close();
       return;

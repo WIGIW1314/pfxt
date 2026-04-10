@@ -329,20 +329,20 @@ async function generateQuestions() {
   </el-dialog>
 </template>
 
-<style scoped>
-.score-dialog :deep(.el-dialog) {
+<style>
+.score-dialog .el-dialog {
   display: flex;
   flex-direction: column;
   max-height: min(92vh, 960px);
 }
 
-.score-dialog :deep(.el-dialog__body) {
+.score-dialog .el-dialog__body {
   flex: 1 1 auto;
   overflow-y: auto;
   padding-bottom: 10px;
 }
 
-.score-dialog :deep(.el-dialog__footer) {
+.score-dialog .el-dialog__footer {
   position: sticky;
   bottom: 0;
   z-index: 2;
@@ -352,7 +352,9 @@ async function generateQuestions() {
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
+</style>
 
+<style scoped>
 .score-comment-toolbar {
   display: flex;
   justify-content: flex-end;
@@ -440,7 +442,7 @@ async function generateQuestions() {
     grid-template-columns: 1fr;
   }
 
-  .score-dialog :deep(.el-dialog__footer) {
+  .score-dialog .el-dialog__footer {
     padding-bottom: calc(12px + env(safe-area-inset-bottom));
   }
 }

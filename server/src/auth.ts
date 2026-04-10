@@ -6,6 +6,9 @@ import { removePresence, touchPresence } from "./presence.js";
 import type { AuthRequest } from "./types.js";
 import { createHttpError } from "./utils.js";
 
+const COOKIE_NAME = "score-system-token";
+const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 days in seconds
+
 const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 const LOGIN_MAX_ATTEMPTS = 10;
 const LOGIN_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
@@ -31,11 +34,34 @@ function checkLoginRate(ip: string) {
   }
 }
 
+/**
+ * Extract JWT token from httpOnly cookie (preferred) or Authorization header (fallback).
+ */
+function extractToken(request: any): string | null {
+  // Primary: httpOnly cookie
+  const cookieToken = request.cookies?.[COOKIE_NAME];
+  if (cookieToken) return cookieToken;
+
+  // Fallback: Authorization header (backward compat)
+  const authHeader = request.headers?.authorization;
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  return null;
+}
+
 export async function registerAuth(app: FastifyInstance) {
   app.decorate("authenticate", async function authenticate(request: AuthRequest, reply) {
+    const token = extractToken(request);
+    if (!token) {
+      return reply.code(401).send({ message: "未登录或登录已失效" });
+    }
     try {
-      await request.jwtVerify();
+      request.user = await request.server.jwt.verify(token);
     } catch {
+      // Token expired or invalid — clear the cookie
+      reply.clearCookie(COOKIE_NAME, { path: "/" });
       reply.code(401).send({ message: "未登录或登录已失效" });
     }
   });
@@ -65,8 +91,16 @@ export async function registerAuth(app: FastifyInstance) {
       role: user.role,
     });
 
+    // Set httpOnly cookie — not accessible via JavaScript (XSS protection)
+    reply.setCookie(COOKIE_NAME, token, {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: COOKIE_MAX_AGE,
+    });
+
     return {
-      token,
       user: {
         id: user.id,
         username: user.username,
@@ -75,6 +109,11 @@ export async function registerAuth(app: FastifyInstance) {
         forceChangePassword: user.forceChangePassword,
       },
     };
+  });
+
+  app.post("/api/auth/logout", async (request, reply) => {
+    reply.clearCookie(COOKIE_NAME, { path: "/" });
+    return { success: true };
   });
 
   app.get("/api/auth/me", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
@@ -101,7 +140,7 @@ export async function registerAuth(app: FastifyInstance) {
     };
   });
 
-  app.post("/api/auth/change-password", { preHandler: [app.authenticate] }, async (request: AuthRequest) => {
+  app.post("/api/auth/change-password", { preHandler: [app.authenticate] }, async (request: AuthRequest, reply) => {
     const body = request.body as { oldPassword: string; newPassword: string };
     const user = await prisma.user.findUniqueOrThrow({ where: { id: request.user.userId } });
     const matched = await bcrypt.compare(body.oldPassword, user.passwordHash);
@@ -113,6 +152,20 @@ export async function registerAuth(app: FastifyInstance) {
     await prisma.user.update({
       where: { id: user.id },
       data: { passwordHash: hash, forceChangePassword: false },
+    });
+
+    // Re-issue cookie with new token to keep session valid
+    const newToken = await reply.jwtSign({
+      userId: user.id,
+      username: user.username,
+      role: user.role,
+    });
+    reply.setCookie(COOKIE_NAME, newToken, {
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: COOKIE_MAX_AGE,
     });
 
     return { success: true };

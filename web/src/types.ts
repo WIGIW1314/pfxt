@@ -92,6 +92,7 @@ export type Group = {
   startTime?: string | null;
   endTime?: string | null;
   qrcodeUrl?: string | null;
+  qrcodeMeta?: string | null; // JSON string storing QrcodeMeta
   note?: string | null;
   studentCount?: number;
   students?: Student[];
@@ -103,6 +104,12 @@ export type Group = {
     customRole?: ActivityCustomRole | null;
     user: { id: string; username: string; realName: string };
   }>;
+};
+
+export type QrcodeMeta = {
+  thumb: { url: string; width: number | null; height: number | null };
+  medium: { url: string; width: number | null; height: number | null };
+  original: { url: string; width: number | null; height: number | null };
 };
 
 export type Student = {

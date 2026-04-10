@@ -1,23 +1,25 @@
 <script setup lang="ts">
-import { defineAsyncComponent, ref, computed, onMounted, onUnmounted } from "vue";
+import { defineAsyncComponent, ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import {
   ArrowDown,
   ArrowRight,
-  Calendar,
   Clock,
   Location,
   UserFilled,
   InfoFilled,
   Search,
 } from "@element-plus/icons-vue";
-import { api, API_BASE } from "../api";
+import { ElSkeleton } from "element-plus";
+import { api, API_BASE, invalidateCache } from "../api";
 import { formatBJ } from "../date";
 import AppShell from "../components/AppShell.vue";
 import { useModalHistory } from "../composables/useModalHistory";
 import { matchesSearchKeyword } from "../utils/search";
+import { useSyncStore } from "../stores/sync";
 
 const DocViewer = defineAsyncComponent(() => import("../components/DocViewer.vue"));
+const sync = useSyncStore();
 const PUBLIC_REFRESH_EVENTS = new Set([
   "activity.updated",
   "group.updated",
@@ -105,6 +107,9 @@ async function silentRefresh() {
       notOpen.value = false;
       activity.value = data;
     }
+    // 清除标题缓存并刷新（活动切换时标题会变）
+    invalidateCache("/api/meta/active-title");
+    await sync.fetchSiteTitle();
   } catch {
     // keep current data on transient errors
   }
@@ -130,6 +135,7 @@ function connectSSE() {
 }
 
 onMounted(() => {
+  sync.fetchSiteTitle();
   fetchData();
   connectSSE();
 });
@@ -138,6 +144,14 @@ onUnmounted(() => {
   eventSource?.close();
   eventSource = null;
 });
+
+watch(
+  () => sync.siteTitle,
+  (title) => {
+    document.title = title;
+  },
+  { immediate: true },
+);
 
 function downloadQrcode(url: string, name: string) {
   const link = document.createElement("a");
@@ -205,10 +219,14 @@ function hasRoleDuty(student: any) {
 
 <template>
   <AppShell :title="activity?.name || '线上评分系统'" mode="public">
-    <!-- 加载中 -->
-    <div v-if="loading" style="text-align: center; padding: 60px 0">
-      <el-icon class="is-loading" :size="28" color="var(--primary)"><Calendar /></el-icon>
-      <p style="color: var(--muted); margin-top: 12px; font-size: 13px">加载中…</p>
+    <!-- 加载中：骨架屏 -->
+    <div v-if="loading" class="public-skeleton">
+      <div class="glass-panel public-skeleton-panel">
+        <ElSkeleton :rows="5" animated style="padding: 8px 0" />
+      </div>
+      <div class="glass-panel public-skeleton-panel">
+        <ElSkeleton :rows="3" animated style="padding: 8px 0" />
+      </div>
     </div>
 
     <!-- 活动未开放 -->
@@ -273,6 +291,8 @@ function hasRoleDuty(student: any) {
               <img
                 :src="group.qrcodeUrl"
                 class="public-qrcode-img"
+                loading="lazy"
+                decoding="async"
                 style="cursor: pointer"
                 @click="previewQrcode = { url: group.qrcodeUrl, name: group.name }"
               />
@@ -439,7 +459,7 @@ function hasRoleDuty(student: any) {
   <Teleport to="body">
     <div v-if="previewQrcode" class="qr-preview-overlay" @click="previewQrcode = null">
       <div class="qr-preview-panel" @click.stop>
-        <img :src="previewQrcode.url" class="qr-preview-img" />
+        <img :src="previewQrcode.url" class="qr-preview-img" loading="lazy" decoding="async" />
         <div class="qr-preview-actions">
           <el-button type="primary" size="small" @click="downloadQrcode(previewQrcode.url, previewQrcode.name)">下载二维码</el-button>
         </div>
@@ -450,6 +470,15 @@ function hasRoleDuty(student: any) {
 </template>
 
 <style scoped>
+.public-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.public-skeleton-panel {
+  padding: 20px;
+}
+
 .public-not-open {
   display: flex;
   flex-direction: column;

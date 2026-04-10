@@ -20,6 +20,33 @@
   font-family: inherit;
 }
 
+/* ---- Accessibility: focus-visible for keyboard users ---- */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Remove default focus ring for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---- Accessibility: minimum touch target size (44px) ---- */
+@media (pointer: coarse) {
+  .el-button,
+  .el-input__inner,
+  .el-select .el-input__inner {
+    min-height: 44px;
+  }
+
+  /* 复选框保持正方形，同时满足44px触摸区域 */
+  .el-checkbox__inner {
+    min-width: 18px;
+    min-height: 18px;
+  }
+}
+
 /* el-image 预览查看器 — 确保移动端图片完整可见 */
 .el-image-viewer__wrapper {
   z-index: 9999 !important;

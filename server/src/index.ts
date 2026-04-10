@@ -3,6 +3,9 @@ process.env.TZ = "Asia/Shanghai";
 
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import compress from "@fastify/compress";
+import cookie from "@fastify/cookie";
+import rateLimit from "@fastify/rate-limit";
 import jwt from "@fastify/jwt";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
@@ -43,13 +46,45 @@ app.setErrorHandler((error, _request, reply) => {
   reply.code(statusCode).send({ message });
 });
 
+// --- Request logging middleware ---
+app.addHook("onResponse", (request, reply, done) => {
+  const method = request.method;
+  const url = request.url;
+  const status = reply.statusCode;
+  const duration = reply.elapsedTime?.toFixed(0) ?? "?";
+  const level = status >= 500 ? "ERR" : status >= 400 ? "WRN" : "INF";
+  // Only log API routes, skip static assets
+  if (url.startsWith("/api/") || url.startsWith("/ws")) {
+    console.log(`[${level}] ${method} ${url} → ${status} (${duration}ms)`);
+    // Warn about slow requests (>500ms for API, >5s for metrics)
+    const ms = Number(duration);
+    if (ms > 500 && !url.startsWith("/api/metrics")) {
+      console.warn(`[SLOW] ${method} ${url} → ${status} took ${duration}ms`);
+    }
+  }
+  done();
+});
+
+await app.register(compress, { encodings: ["gzip", "br"] });
+await app.register(cookie);
 await app.register(cors, {
   origin: allowedOrigin ? allowedOrigin.split(",").map((s) => s.trim()) : false,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true, // Allow cookies in cross-origin requests
 });
 await app.register(jwt, { secret: jwtSecret });
-await app.register(multipart);
+await app.register(multipart, {
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB max per file
+    fieldSize: 1 * 1024 * 1024,  // 1MB max per field
+  },
+});
+await app.register(rateLimit, {
+  max: 200,             // 200 requests per timeWindow per IP
+  timeWindow: "1 minute",
+  allowList: ["127.0.0.1"], // Exempt health checks from localhost
+});
 await app.register(websocket);
 
 // --- 静态文件：上传的公告附件 ---
@@ -73,6 +108,9 @@ await app.register(fastifyStatic, {
   root: uploadsDir,
   prefix: "/api/uploads/",
   decorateReply: false,
+  setHeaders(res) {
+    res.setHeader("Cache-Control", "public, max-age=3600");
+  },
 });
 
 app.get("/api/assets/logo.svg", async (_request, reply) => {
@@ -95,3 +133,18 @@ app.get("/api/health", async () => ({ ok: true }));
 const port = Number(process.env.PORT ?? 3100);
 await app.listen({ port, host: "0.0.0.0" });
 console.log(`server running on http://127.0.0.1:${port}`);
+
+// --- Graceful shutdown: wait for in-flight requests to finish ---
+const shutdown = async (signal: string) => {
+  console.log(`Received ${signal}, shutting down gracefully...`);
+  try {
+    await app.close();
+    console.log("Server closed successfully.");
+  } catch (err) {
+    console.error("Error during shutdown:", err);
+    process.exit(1);
+  }
+  process.exit(0);
+};
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
