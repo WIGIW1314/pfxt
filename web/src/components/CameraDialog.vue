@@ -22,63 +22,18 @@ let facingMode: "environment" | "user" = "environment";
 function buildVideoConstraints(mode: "environment" | "user"): MediaTrackConstraints {
   return {
     facingMode: { ideal: mode },
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
+    // 避免强制 16:9 导致浏览器做 crop-and-scale，出现“被放大”观感
+    aspectRatio: { ideal: 4 / 3 },
+    width: { ideal: 1600 },
+    height: { ideal: 1200 },
   };
 }
 
-function scoreCameraLabel(label: string, mode: "environment" | "user") {
-  const text = label.toLowerCase();
-  let score = 0;
-  if (mode === "environment") {
-    if (/(back|rear|environment|后置|后摄)/.test(text)) score += 60;
-    if (/(main|wide|广角|主摄|标准)/.test(text)) score += 20;
-    if (/(tele|zoom|长焦)/.test(text)) score -= 40;
-    if (/(front|user|前置|前摄)/.test(text)) score -= 80;
-  } else {
-    if (/(front|user|前置|前摄)/.test(text)) score += 60;
-    if (/(back|rear|environment|后置|后摄)/.test(text)) score -= 80;
-  }
-  return score;
-}
-
 async function openPreferredCamera(mode: "environment" | "user") {
-  const initial = await navigator.mediaDevices.getUserMedia({
+  return navigator.mediaDevices.getUserMedia({
     video: buildVideoConstraints(mode),
     audio: false,
   });
-
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const cameras = devices.filter((item) => item.kind === "videoinput");
-  if (!cameras.length) {
-    return initial;
-  }
-
-  const best = [...cameras].sort((a, b) => scoreCameraLabel(b.label || "", mode) - scoreCameraLabel(a.label || "", mode))[0];
-  if (!best?.deviceId) {
-    return initial;
-  }
-
-  const currentTrack = initial.getVideoTracks()[0];
-  const currentDeviceId = (currentTrack?.getSettings?.().deviceId as string | undefined) || "";
-  if (best.deviceId === currentDeviceId) {
-    return initial;
-  }
-
-  try {
-    const exact = await navigator.mediaDevices.getUserMedia({
-      video: {
-        deviceId: { exact: best.deviceId },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-      audio: false,
-    });
-    initial.getTracks().forEach((t) => t.stop());
-    return exact;
-  } catch {
-    return initial;
-  }
 }
 
 function getErrorMessage(name: string | undefined, msg?: string): string {
@@ -320,9 +275,12 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
 .camera-preview-wrap {
   position: relative;
   width: 100%;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  height: auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #000;
   border-radius: 0;
   overflow: hidden;
@@ -467,14 +425,16 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
 }
 
 :deep(.camera-dialog-force-full.el-dialog .el-dialog__header) {
-  padding: 8px 12px 6px !important;
-  margin: 0 !important;
+  display: none !important;
 }
 
 :deep(.camera-dialog-force-full.el-dialog .el-dialog__body) {
-  height: calc(100dvh - 46px);
+  height: 100dvh !important;
   padding: 0 !important;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #000;
 }
 
 @media (max-width: 768px) {
