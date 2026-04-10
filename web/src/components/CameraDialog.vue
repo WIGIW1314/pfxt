@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -16,8 +16,24 @@ const errorMsg = ref("");
 const switching = ref(false);
 const uploading = ref(false);
 const flashing = ref(false);
+const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
 let stream: MediaStream | null = null;
 let facingMode: "environment" | "user" = "environment";
+const cameraDialogFullscreen = computed(() => viewportWidth.value <= 768);
+
+function syncViewportWidth() {
+  if (typeof window === "undefined") return;
+  viewportWidth.value = window.innerWidth;
+}
+
+function buildVideoConstraints(mode: "environment" | "user"): MediaTrackConstraints {
+  return {
+    facingMode: { ideal: mode },
+    width: { ideal: 1920 },
+    height: { ideal: 1440 },
+    aspectRatio: { ideal: 4 / 3 },
+  };
+}
 
 function getErrorMessage(name: string | undefined, msg?: string): string {
   switch (name) {
@@ -56,7 +72,7 @@ async function openCamera() {
 
   try {
     const constraints: MediaStreamConstraints = {
-      video: { facingMode: { ideal: facingMode } },
+      video: buildVideoConstraints(facingMode),
       audio: false,
     };
     stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -70,7 +86,7 @@ async function openCamera() {
       facingMode = "user";
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode } },
+          video: buildVideoConstraints(facingMode),
           audio: false,
         });
         await bindStreamToVideo(stream);
@@ -161,13 +177,24 @@ function onDialogClose() {
 
 onBeforeUnmount(() => {
   stopCamera();
+  if (typeof window !== "undefined") {
+    window.removeEventListener("resize", syncViewportWidth);
+  }
+});
+
+onMounted(() => {
+  syncViewportWidth();
+  if (typeof window !== "undefined") {
+    window.addEventListener("resize", syncViewportWidth);
+  }
 });
 </script>
 
 <template>
   <el-dialog
     :model-value="modelValue"
-    width="min(480px, calc(100vw - 16px))"
+    width="min(920px, calc(100vw - 16px))"
+    :fullscreen="cameraDialogFullscreen"
     :show-close="true"
     :close-on-click-modal="false"
     title="拍照上传"
@@ -248,7 +275,7 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
 .camera-preview-wrap {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: min(72vh, 760px);
   background: #000;
   border-radius: 10px;
   overflow: hidden;
@@ -257,7 +284,7 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
 .camera-video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   transition: opacity 0.2s;
 }
@@ -358,5 +385,12 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   display: flex;
   justify-content: center;
   gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .camera-preview-wrap {
+    height: calc(100dvh - 220px);
+    border-radius: 8px;
+  }
 }
 </style>
