@@ -19,7 +19,10 @@ const flashing = ref(false);
 const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
 let stream: MediaStream | null = null;
 let facingMode: "environment" | "user" = "environment";
-const cameraDialogFullscreen = computed(() => viewportWidth.value <= 768);
+const cameraDialogFullscreen = computed(() => {
+  if (typeof window === "undefined") return viewportWidth.value <= 768;
+  return viewportWidth.value <= 1024 || window.matchMedia("(pointer: coarse)").matches;
+});
 
 function syncViewportWidth() {
   if (typeof window === "undefined") return;
@@ -29,9 +32,6 @@ function syncViewportWidth() {
 function buildVideoConstraints(mode: "environment" | "user"): MediaTrackConstraints {
   return {
     facingMode: { ideal: mode },
-    width: { ideal: 1920 },
-    height: { ideal: 1440 },
-    aspectRatio: { ideal: 4 / 3 },
   };
 }
 
@@ -106,6 +106,18 @@ async function openCamera() {
 async function bindStreamToVideo(activeStream: MediaStream) {
   cameraState.value = "active";
   await nextTick();
+  const track = activeStream.getVideoTracks?.()[0] as any;
+  if (track?.getCapabilities && track?.applyConstraints) {
+    try {
+      const caps = track.getCapabilities();
+      if (caps?.zoom && typeof caps.zoom.min === "number" && typeof caps.zoom.max === "number") {
+        const targetZoom = Math.min(caps.zoom.max, Math.max(caps.zoom.min, 1));
+        await track.applyConstraints({ advanced: [{ zoom: targetZoom }] });
+      }
+    } catch {
+      // 某些浏览器不支持 zoom 约束，忽略即可
+    }
+  }
   const video = videoRef.value;
   if (!video) throw new Error("视频预览节点未就绪");
   video.srcObject = activeStream;
@@ -198,7 +210,7 @@ onMounted(() => {
     :show-close="true"
     :close-on-click-modal="false"
     title="拍照上传"
-    class="camera-dialog"
+    :class="['camera-dialog', { 'camera-dialog-force-full': cameraDialogFullscreen }]"
     @open="onDialogOpen"
     @close="onDialogClose"
     @update:model-value="(v: boolean) => { if (!v) closeDialog(); }"
@@ -215,6 +227,14 @@ onMounted(() => {
           :class="{ 'camera-switching': switching, 'camera-flash': flashing }"
         />
         <canvas ref="canvasRef" style="display: none" />
+
+        <!-- 工具栏 -->
+        <div class="camera-toolbar-overlay">
+          <el-button text class="camera-toolbar-btn" @click="switchCamera" :loading="switching">
+            <el-icon :size="18"><RefreshRight /></el-icon>
+            <span style="margin-left: 4px">翻转</span>
+          </el-button>
+        </div>
 
         <!-- 拍照按钮 -->
         <div v-if="!switching && !uploading" class="camera-shutter-ring" @click="takePhoto">
@@ -250,13 +270,6 @@ onMounted(() => {
         <div class="muted" style="margin-top: 8px">正在打开相机…</div>
       </div>
 
-      <!-- 工具栏 -->
-      <div v-if="cameraState === 'active'" class="camera-toolbar">
-        <el-button text @click="switchCamera" :loading="switching">
-          <el-icon :size="20"><RefreshRight /></el-icon>
-          <span style="margin-left: 4px">翻转</span>
-        </el-button>
-      </div>
     </div>
   </el-dialog>
 </template>
@@ -270,12 +283,16 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   display: flex;
   flex-direction: column;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
 }
 
 .camera-preview-wrap {
   position: relative;
   width: 100%;
-  height: min(72vh, 760px);
+  flex: 1;
+  min-height: 360px;
+  height: auto;
   background: #000;
   border-radius: 10px;
   overflow: hidden;
@@ -363,7 +380,7 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  aspect-ratio: 4 / 3;
+  min-height: 300px;
   background: #f5f7fa;
   border-radius: 10px;
 }
@@ -379,18 +396,64 @@ import { Camera, Loading, RefreshRight, WarningFilled } from "@element-plus/icon
   text-align: center;
   padding: 0 24px;
   line-height: 1.6;
+  max-width: 88%;
 }
 
-.camera-toolbar {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
+:deep(.camera-dialog.el-dialog.is-fullscreen) {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100dvh !important;
+  margin: 0 !important;
+}
+
+:deep(.camera-dialog.el-dialog.is-fullscreen .el-dialog__body) {
+  height: calc(100dvh - 64px);
+  padding: 8px;
+  overflow: hidden;
+}
+
+.camera-toolbar-overlay {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+}
+
+.camera-toolbar-btn.el-button {
+  min-height: 28px !important;
+  padding: 0 8px !important;
+  border-radius: 999px !important;
+  background: rgba(0, 0, 0, 0.36) !important;
+  color: #fff !important;
+  backdrop-filter: blur(4px);
+}
+
+:deep(.camera-dialog-force-full.el-dialog) {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100dvh !important;
+  margin: 0 !important;
+}
+
+:deep(.camera-dialog-force-full.el-dialog .el-dialog__header) {
+  padding: 10px 14px 8px !important;
+}
+
+:deep(.camera-dialog-force-full.el-dialog .el-dialog__body) {
+  height: calc(100dvh - 56px);
+  padding: 8px !important;
+  overflow: hidden;
 }
 
 @media (max-width: 768px) {
   .camera-preview-wrap {
-    height: calc(100dvh - 220px);
+    min-height: 0;
     border-radius: 8px;
+  }
+
+  .camera-placeholder {
+    min-height: 0;
+    flex: 1;
   }
 }
 </style>
