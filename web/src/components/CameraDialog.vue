@@ -31,21 +31,53 @@ const wideDisabled = computed(() => wideKnownUnavailable.value);
 let stream: MediaStream | null = null;
 let facingMode: "environment" | "user" = "environment";
 
-function buildVideoConstraints(mode: "environment" | "user"): MediaTrackConstraints {
+type QualityProfile = "ultra" | "high" | "mid" | "base";
+
+function buildVideoConstraints(mode: "environment" | "user", profile: QualityProfile = "high"): MediaTrackConstraints {
+  if (profile === "ultra") {
+    return {
+      facingMode: { ideal: mode },
+      width: { min: 1920, ideal: 2560 },
+      height: { min: 1080, ideal: 1440 },
+      frameRate: { ideal: 30, max: 60 },
+    };
+  }
+  if (profile === "high") {
+    return {
+      facingMode: { ideal: mode },
+      width: { min: 1280, ideal: 1920 },
+      height: { min: 720, ideal: 1080 },
+      frameRate: { ideal: 30, max: 60 },
+    };
+  }
+  if (profile === "mid") {
+    return {
+      facingMode: { ideal: mode },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      frameRate: { ideal: 24, max: 30 },
+    };
+  }
   return {
     facingMode: { ideal: mode },
-    // 避免强制 16:9 导致浏览器做 crop-and-scale，出现“被放大”观感
-    aspectRatio: { ideal: 4 / 3 },
-    width: { ideal: 1600 },
-    height: { ideal: 1200 },
+    frameRate: { ideal: 24, max: 30 },
   };
 }
 
-async function openPreferredCamera(mode: "environment" | "user") {
-  return navigator.mediaDevices.getUserMedia({
-    video: buildVideoConstraints(mode),
-    audio: false,
-  });
+async function requestStreamWithFallback(mode: "environment" | "user"): Promise<MediaStream> {
+  const profiles: QualityProfile[] = ["ultra", "high", "mid", "base"];
+  let lastErr: unknown = null;
+  for (const profile of profiles) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: buildVideoConstraints(mode, profile),
+        audio: false,
+      });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("相机启动失败");
 }
 
 function scoreRearMainLabel(label: string): number {
@@ -102,10 +134,15 @@ function updateCameraMapFromDevices(devices: MediaDeviceInfo[]) {
 
 async function openCameraByMode(mode: CameraMode): Promise<MediaStream> {
   const requestedFacing: "environment" | "user" = mode === "front" ? "user" : "environment";
-  const initial = await openPreferredCamera(requestedFacing);
+  const initial = await requestStreamWithFallback(requestedFacing);
 
   const devices = await navigator.mediaDevices.enumerateDevices();
   updateCameraMapFromDevices(devices);
+
+  // 1x 优先使用系统默认后置主摄，避免误切到长焦导致“2x”观感
+  if (mode === "1x") {
+    return initial;
+  }
 
   const targetDeviceId = cameraDeviceMap.value[mode];
   if (!targetDeviceId) {
@@ -122,9 +159,9 @@ async function openCameraByMode(mode: CameraMode): Promise<MediaStream> {
     const exact = await navigator.mediaDevices.getUserMedia({
       video: {
         deviceId: { exact: targetDeviceId },
-        width: { ideal: 1600 },
-        height: { ideal: 1200 },
-        aspectRatio: { ideal: 4 / 3 },
+        width: { min: 1280, ideal: 1920 },
+        height: { min: 720, ideal: 1080 },
+        frameRate: { ideal: 30, max: 60 },
       },
       audio: false,
     });
@@ -206,9 +243,19 @@ async function bindStreamToVideo(activeStream: MediaStream) {
   if (track?.getCapabilities && track?.applyConstraints) {
     try {
       const caps = track.getCapabilities();
+      const advanced: Record<string, number>[] = [];
+      if (caps?.width?.max && caps?.height?.max) {
+        advanced.push({
+          width: Math.min(caps.width.max, 2560),
+          height: Math.min(caps.height.max, 1440),
+        });
+      }
       if (caps?.zoom && typeof caps.zoom.min === "number" && typeof caps.zoom.max === "number") {
         const targetZoom = caps.zoom.min <= 1 && caps.zoom.max >= 1 ? 1 : caps.zoom.min;
-        await track.applyConstraints({ advanced: [{ zoom: targetZoom }] });
+        advanced.push({ zoom: targetZoom });
+      }
+      if (advanced.length) {
+        await track.applyConstraints({ advanced });
       }
     } catch {
       // 某些浏览器不支持 zoom 约束，忽略即可
