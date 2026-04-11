@@ -1184,65 +1184,63 @@ onBeforeRouteUpdate(async () => {
                     <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
                   </div>
                 </template>
-                <template v-else>
-                  <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
-                    <div class="judge-artwork-header">
-                      <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
-                      <div class="judge-artwork-actions">
-                        <el-button
-                          size="small"
-                          type="primary"
-                          plain
-                          :icon="Camera"
-                          :disabled="isArtworkReadonly() || artworkUploading[student.id]"
-                          :loading="artworkUploading[student.id]"
-                          @click="triggerJudgeArtworkUpload(student.id, 'camera')"
-                        >
-                          拍照
-                        </el-button>
-                        <el-button
-                          size="small"
-                          plain
-                          :disabled="isArtworkReadonly() || artworkUploading[student.id]"
-                          @click="triggerJudgeArtworkUpload(student.id, 'gallery')"
-                        >
-                          相册
-                        </el-button>
-                      </div>
-                      <input
-                        :id="`judge-artwork-input-gal-${student.id}`"
-                        accept="image/*"
-                        type="file"
-                        class="visually-hidden"
-                        @change="onJudgeArtworkInputChange(student, $event)"
+                <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
+                  <div class="judge-artwork-header">
+                    <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
+                    <div class="judge-artwork-actions">
+                      <el-button
+                        size="small"
+                        type="primary"
+                        plain
+                        :icon="Camera"
+                        :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                        :loading="artworkUploading[student.id]"
+                        @click="triggerJudgeArtworkUpload(student.id, 'camera')"
+                      >
+                        拍照
+                      </el-button>
+                      <el-button
+                        size="small"
+                        plain
+                        :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                        @click="triggerJudgeArtworkUpload(student.id, 'gallery')"
+                      >
+                        相册
+                      </el-button>
+                    </div>
+                    <input
+                      :id="`judge-artwork-input-gal-${student.id}`"
+                      accept="image/*"
+                      type="file"
+                      class="visually-hidden"
+                      @change="onJudgeArtworkInputChange(student, $event)"
+                    />
+                  </div>
+                  <div v-if="!getStudentArtworks(student).length" class="muted judge-artwork-empty">暂无作品图</div>
+                  <div v-else class="judge-artwork-grid">
+                    <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="judge-artwork-item">
+                      <el-image
+                        :src="artwork.url"
+                        :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                        :initial-index="index"
+                        fit="cover"
+                        class="judge-artwork-image"
+                      />
+                      <el-button
+                        class="judge-artwork-delete"
+                        size="small"
+                        type="danger"
+                        plain
+                        :icon="Delete"
+                        :disabled="isArtworkReadonly() || artworkDeleting[artwork.id]"
+                        :loading="artworkDeleting[artwork.id]"
+                        @click="deleteJudgeArtwork(student, artwork)"
                       />
                     </div>
-                    <div v-if="!getStudentArtworks(student).length" class="muted judge-artwork-empty">暂无作品图</div>
-                    <div v-else class="judge-artwork-grid">
-                      <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="judge-artwork-item">
-                        <el-image
-                          :src="artwork.url"
-                          :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
-                          :initial-index="index"
-                          fit="cover"
-                          class="judge-artwork-image"
-                        />
-                        <el-button
-                          class="judge-artwork-delete"
-                          size="small"
-                          type="danger"
-                          plain
-                          :icon="Delete"
-                          :disabled="isArtworkReadonly() || artworkDeleting[artwork.id]"
-                          :loading="artworkDeleting[artwork.id]"
-                          @click="deleteJudgeArtwork(student, artwork)"
-                        />
-                      </div>
-                    </div>
-                    <div v-if="!canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
                   </div>
-                  <el-button :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
-                </template>
+                  <div v-if="!student.myVoted && !canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
+                </div>
+                <el-button v-if="!student.myVoted" :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
               </template>
               <template v-else>
               <div class="panel-header">
@@ -1558,65 +1556,63 @@ onBeforeRouteUpdate(async () => {
                 <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
               </div>
             </template>
-            <template v-else>
-              <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
-                <div class="judge-artwork-header">
-                  <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
-                  <div class="judge-artwork-actions">
-                    <el-button
-                      size="small"
-                      type="primary"
-                      plain
-                      :icon="Camera"
-                      :disabled="isArtworkReadonly() || artworkUploading[student.id]"
-                      :loading="artworkUploading[student.id]"
-                      @click="triggerJudgeArtworkUpload(student.id, 'camera')"
-                    >
-                      拍照
-                    </el-button>
-                    <el-button
-                      size="small"
-                      plain
-                      :disabled="isArtworkReadonly() || artworkUploading[student.id]"
-                      @click="triggerJudgeArtworkUpload(student.id, 'gallery')"
-                    >
-                      相册
-                    </el-button>
-                  </div>
-                  <input
-                    :id="`judge-artwork-input-gal-${student.id}`"
-                    accept="image/*"
-                    type="file"
-                    class="visually-hidden"
-                    @change="onJudgeArtworkInputChange(student, $event)"
+            <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
+              <div class="judge-artwork-header">
+                <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
+                <div class="judge-artwork-actions">
+                  <el-button
+                    size="small"
+                    type="primary"
+                    plain
+                    :icon="Camera"
+                    :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                    :loading="artworkUploading[student.id]"
+                    @click="triggerJudgeArtworkUpload(student.id, 'camera')"
+                  >
+                    拍照
+                  </el-button>
+                  <el-button
+                    size="small"
+                    plain
+                    :disabled="isArtworkReadonly() || artworkUploading[student.id]"
+                    @click="triggerJudgeArtworkUpload(student.id, 'gallery')"
+                  >
+                    相册
+                  </el-button>
+                </div>
+                <input
+                  :id="`judge-artwork-input-gal-${student.id}`"
+                  accept="image/*"
+                  type="file"
+                  class="visually-hidden"
+                  @change="onJudgeArtworkInputChange(student, $event)"
+                />
+              </div>
+              <div v-if="!getStudentArtworks(student).length" class="muted judge-artwork-empty">暂无作品图</div>
+              <div v-else class="judge-artwork-grid">
+                <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="judge-artwork-item">
+                  <el-image
+                    :src="artwork.url"
+                    :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                    :initial-index="index"
+                    fit="cover"
+                    class="judge-artwork-image"
+                  />
+                  <el-button
+                    class="judge-artwork-delete"
+                    size="small"
+                    type="danger"
+                    plain
+                    :icon="Delete"
+                    :disabled="isArtworkReadonly() || artworkDeleting[artwork.id]"
+                    :loading="artworkDeleting[artwork.id]"
+                    @click="deleteJudgeArtwork(student, artwork)"
                   />
                 </div>
-                <div v-if="!getStudentArtworks(student).length" class="muted judge-artwork-empty">暂无作品图</div>
-                <div v-else class="judge-artwork-grid">
-                  <div v-for="(artwork, index) in getStudentArtworks(student)" :key="artwork.id" class="judge-artwork-item">
-                    <el-image
-                      :src="artwork.url"
-                      :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
-                      :initial-index="index"
-                      fit="cover"
-                      class="judge-artwork-image"
-                    />
-                    <el-button
-                      class="judge-artwork-delete"
-                      size="small"
-                      type="danger"
-                      plain
-                      :icon="Delete"
-                      :disabled="isArtworkReadonly() || artworkDeleting[artwork.id]"
-                      :loading="artworkDeleting[artwork.id]"
-                      @click="deleteJudgeArtwork(student, artwork)"
-                    />
-                  </div>
-                </div>
-                <div v-if="!canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
               </div>
-              <el-button :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
-            </template>
+              <div v-if="!student.myVoted && !canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
+            </div>
+            <el-button v-if="!student.myVoted" :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
           </div>
         </div>
       </section>
