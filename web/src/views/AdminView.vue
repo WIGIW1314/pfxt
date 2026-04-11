@@ -1847,6 +1847,16 @@ async function deleteStudentArtwork(student: Student, artwork: StudentArtwork) {
     return;
   }
 
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${student.name}」的这张作品图吗？此操作不可撤销。`,
+      "删除作品图",
+      { confirmButtonText: "确认删除", cancelButtonText: "取消", type: "warning" },
+    );
+  } catch {
+    return;
+  }
+
   studentArtworkDeleting[artwork.id] = true;
   try {
     const { data } = await api.delete(`/api/admin/students/${student.id}/artworks/${artwork.id}`);

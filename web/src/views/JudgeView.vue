@@ -472,6 +472,15 @@ async function deleteJudgeArtwork(student: Student, artwork: StudentArtwork) {
     ElMessage.warning(lockReason.value + "，无法删除作品图");
     return;
   }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除「${student.name}」的这张作品图吗？此操作不可撤销。`,
+      "删除作品图",
+      { confirmButtonText: "确认删除", cancelButtonText: "取消", type: "warning" },
+    );
+  } catch {
+    return;
+  }
   artworkDeleting[artwork.id] = true;
   try {
     const { data } = await api.delete(`/api/judge/activities/${activityId.value}/students/${student.id}/artworks/${artwork.id}`);
