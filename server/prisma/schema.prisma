@@ -64,6 +64,7 @@ model Activity {
   showPeerScoresToJudge        Boolean            @default(false)
   showGroupProgressToSecretary Boolean            @default(true)
   showVoteCountToJudge        Boolean            @default(false)
+  requireArtworkForVote        Boolean            @default(true)
   showExportZip                Boolean            @default(true)
   showExportXlsx               Boolean            @default(true)
   showCommentUi                Boolean            @default(true)

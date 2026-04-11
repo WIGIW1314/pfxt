@@ -73,6 +73,7 @@ async function normalizeActiveActivity() {
       showPeerScoresToJudge: true,
       showGroupProgressToSecretary: true,
       showVoteCountToJudge: true,
+      requireArtworkForVote: true,
       startTime: true,
       endTime: true,
       announcement: true,
@@ -132,6 +133,7 @@ export function registerAdminActivityRoutes(app: FastifyInstance) {
         showPeerScoresToJudge: true,
         showGroupProgressToSecretary: true,
         showVoteCountToJudge: true,
+        requireArtworkForVote: true,
         startTime: true,
         endTime: true,
         announcement: true,
@@ -173,6 +175,7 @@ export function registerAdminActivityRoutes(app: FastifyInstance) {
       startTime?: string | null;
       endTime?: string | null;
       isPublicVisible?: boolean;
+      requireArtworkForVote?: boolean;
     };
 
     const activeCount = await prisma.activity.count({
@@ -324,6 +327,7 @@ export function registerAdminActivityRoutes(app: FastifyInstance) {
       startTime?: string | null;
       endTime?: string | null;
       isPublicVisible?: boolean;
+      requireArtworkForVote?: boolean;
     };
 
     if (!body.name?.trim()) {
@@ -372,6 +376,8 @@ export function registerAdminActivityRoutes(app: FastifyInstance) {
           showAvgToJudge: sourceActivity.showAvgToJudge,
           showPeerScoresToJudge: sourceActivity.showPeerScoresToJudge,
           showGroupProgressToSecretary: sourceActivity.showGroupProgressToSecretary,
+          showVoteCountToJudge: sourceActivity.showVoteCountToJudge,
+          requireArtworkForVote: sourceActivity.requireArtworkForVote,
           announcement: sourceActivity.announcement,
           announcementFiles: sourceActivity.announcementFiles,
           judgeAnnouncement: sourceActivity.judgeAnnouncement,

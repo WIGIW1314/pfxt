@@ -25,6 +25,11 @@ function isVotingActivity(activity: { type?: string | null } | null | undefined)
   return activity?.type === "投票";
 }
 
+function isArtworkRequiredForVote(activity: { type?: string | null; requireArtworkForVote?: boolean | null } | null | undefined) {
+  if (!isVotingActivity(activity)) return false;
+  return activity?.requireArtworkForVote !== false;
+}
+
 function normalizeArtworkFilename(activityId: string, studentId: string) {
   const activityPart = String(activityId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "activity";
   const studentPart = String(studentId || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "student";
@@ -51,7 +56,7 @@ export function registerAdminStudentRoutes(app: FastifyInstance) {
     const [activity, students] = await Promise.all([
       prisma.activity.findUnique({
         where: { id: activityId },
-        select: { type: true },
+        select: { type: true, requireArtworkForVote: true },
       }),
       prisma.student.findMany({
         where: { activityId },
@@ -96,11 +101,12 @@ export function registerAdminStudentRoutes(app: FastifyInstance) {
     ]);
     const summaryMap = await getStudentSummaryMap(activityId, students.map((student) => student.id));
     const votingMode = isVotingActivity(activity);
+    const requireArtworkForVote = isArtworkRequiredForVote(activity);
 
     return students.map((student) => ({
       ...student,
       artworkCount: student.artworks.length,
-      canVote: votingMode ? student.artworks.length > 0 : true,
+      canVote: votingMode ? (!requireArtworkForVote || student.artworks.length > 0) : true,
       summary: summaryMap.get(student.id) || null,
     }));
   });
@@ -323,7 +329,7 @@ export function registerAdminStudentRoutes(app: FastifyInstance) {
         activityId: true,
         name: true,
         activity: {
-          select: { type: true },
+          select: { type: true, requireArtworkForVote: true },
         },
       },
     });
@@ -403,7 +409,7 @@ export function registerAdminStudentRoutes(app: FastifyInstance) {
       return {
         artwork,
         artworkCount,
-        canVote: artworkCount > 0,
+        canVote: !isArtworkRequiredForVote(student.activity) || artworkCount > 0,
       };
     } catch (error) {
       await safeUnlinkByUrl(fileUrl);
@@ -421,7 +427,7 @@ export function registerAdminStudentRoutes(app: FastifyInstance) {
         activityId: true,
         name: true,
         activity: {
-          select: { type: true },
+          select: { type: true, requireArtworkForVote: true },
         },
       },
     });
@@ -461,7 +467,7 @@ export function registerAdminStudentRoutes(app: FastifyInstance) {
     return {
       success: true,
       artworkCount,
-      canVote: artworkCount > 0,
+      canVote: !isArtworkRequiredForVote(student.activity) || artworkCount > 0,
     };
   });
 }

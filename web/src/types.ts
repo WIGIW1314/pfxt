@@ -57,6 +57,7 @@ export type Activity = {
   allowEditScore: boolean;
   showAvgToJudge: boolean;
   showVoteCountToJudge: boolean;
+  requireArtworkForVote: boolean;
   startTime?: string | null;
   endTime?: string | null;
   announcement?: string | null;

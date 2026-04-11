@@ -621,6 +621,11 @@ function isVotingActivity(activity: { type?: string | null } | null | undefined)
   return activity?.type === "投票";
 }
 
+function isArtworkRequiredForVote(activity: { type?: string | null; requireArtworkForVote?: boolean | null } | null | undefined): boolean {
+  if (!isVotingActivity(activity)) return false;
+  return activity?.requireArtworkForVote !== false;
+}
+
 function buildContentDisposition(filename: string, fallback: string) {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
@@ -1846,13 +1851,17 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     });
     const summaryMap = await getStudentSummaryMap(activityId, students.map((student) => student.id));
 
-    const activityInfo = await prisma.activity.findUnique({ where: { id: activityId }, select: { type: true } });
+    const activityInfo = await prisma.activity.findUnique({
+      where: { id: activityId },
+      select: { type: true, requireArtworkForVote: true },
+    });
     const votingMode = isVotingActivity(activityInfo);
+    const requireArtworkForVote = isArtworkRequiredForVote(activityInfo);
 
     return students.map((student) => ({
       ...student,
       artworkCount: student.artworks.length,
-      canVote: votingMode ? student.artworks.length > 0 : true,
+      canVote: votingMode ? (!requireArtworkForVote || student.artworks.length > 0) : true,
       myVoted: votingMode ? student.scores.some((s) => s.status === ScoreStatus.SUBMITTED) : undefined,
       myScoreStatus: student.scores[0]?.status ?? null,
       summary: summaryMap.get(student.id) || null,
@@ -1864,14 +1873,14 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
     const activity = await prisma.activity.findUniqueOrThrow({
       where: { id: activityId },
-      select: { type: true, isLocked: true },
+      select: { type: true, isLocked: true, requireArtworkForVote: true },
     });
     if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
     await ensureActivityUnlocked(activityId);
     const { student } = await ensureJudgeAccess(activityId, studentId, request.user.userId);
     await ensureGroupUnlocked(student.groupId);
     const artworkCount = await prisma.studentArtwork.count({ where: { studentId } });
-    if (artworkCount <= 0) {
+    if (isArtworkRequiredForVote(activity) && artworkCount <= 0) {
       throw createHttpError("该学生暂无作品图，请先上传后再投票", 400);
     }
 
@@ -1924,7 +1933,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     const { activityId, studentId } = request.params as { activityId: string; studentId: string };
     const activity = await prisma.activity.findUniqueOrThrow({
       where: { id: activityId },
-      select: { type: true },
+      select: { type: true, requireArtworkForVote: true },
     });
     if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
     await ensureActivityUnlocked(activityId);
@@ -2001,7 +2010,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
       return {
         artwork,
         artworkCount,
-        canVote: artworkCount > 0,
+        canVote: !isArtworkRequiredForVote(activity) || artworkCount > 0,
       };
     } catch (error) {
       await safeUnlinkArtworkByUrl(fileUrl);
@@ -2013,7 +2022,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     const { activityId, studentId, artworkId } = request.params as { activityId: string; studentId: string; artworkId: string };
     const activity = await prisma.activity.findUniqueOrThrow({
       where: { id: activityId },
-      select: { type: true },
+      select: { type: true, requireArtworkForVote: true },
     });
     if (!isVotingActivity(activity)) throw createHttpError("当前活动不是投票模式", 400);
     await ensureActivityUnlocked(activityId);
@@ -2049,7 +2058,7 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
     return {
       success: true,
       artworkCount,
-      canVote: artworkCount > 0,
+      canVote: !isArtworkRequiredForVote(activity) || artworkCount > 0,
     };
   });
 
@@ -2081,11 +2090,12 @@ export async function registerJudgeRoutes(app: FastifyInstance) {
       getAnonymousPeerScores(activityId, studentId, request.user.userId),
     ]);
     const votingMode = isVotingActivity(student.activity);
+    const requireArtworkForVote = isArtworkRequiredForVote(student.activity);
     return {
       ...student,
       votingMode,
       artworkCount: student.artworks.length,
-      canVote: votingMode ? student.artworks.length > 0 : true,
+      canVote: votingMode ? (!requireArtworkForVote || student.artworks.length > 0) : true,
       peerScores: votingMode ? [] : peerScores,
       summary: await getStudentSummary(activityId, student.id),
     };

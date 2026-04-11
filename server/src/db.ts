@@ -179,6 +179,9 @@ export async function ensureRuntimeSchema() {
   if (!columnNames.has("showQuestionUi")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "showQuestionUi" BOOLEAN NOT NULL DEFAULT 1;`);
   }
+  if (!columnNames.has("requireArtworkForVote")) {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "requireArtworkForVote" BOOLEAN NOT NULL DEFAULT 1;`);
+  }
   if (!columnNames.has("judgeAnnouncement")) {
     await prisma.$executeRawUnsafe(`ALTER TABLE "Activity" ADD COLUMN "judgeAnnouncement" TEXT;`);
   }

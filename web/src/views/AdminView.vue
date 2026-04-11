@@ -549,6 +549,7 @@ const LOG_FIELD_LABELS: Record<string, string> = {
   showExportZip: "允许导出ZIP",
   showExportXlsx: "允许导出XLSX",
   showVoteCountToJudge: "评委可见票数",
+  requireArtworkForVote: "需作品图后才可投票",
   isPublicVisible: "公开可见",
   startTime: "开始时间",
   endTime: "结束时间",
@@ -960,6 +961,7 @@ const activityForm = reactive({
   showCommentUi: true,
   showQuestionUi: true,
   showVoteCountToJudge: false,
+  requireArtworkForVote: true,
 });
 
 // 修改密码弹窗相关
@@ -1262,6 +1264,7 @@ function resetActivityForm() {
     showCommentUi: true,
     showQuestionUi: true,
     showVoteCountToJudge: false,
+    requireArtworkForVote: true,
   });
 }
 
@@ -1371,6 +1374,7 @@ function openEditActivity(_activity: Activity) {
       showCommentUi: activity.showCommentUi ?? true,
       showQuestionUi: activity.showQuestionUi ?? true,
       showVoteCountToJudge: activity.showVoteCountToJudge ?? false,
+      requireArtworkForVote: activity.requireArtworkForVote ?? true,
     });
   });
   activityDialog.value = true;
@@ -1395,6 +1399,7 @@ function openCloneActivity(activity: Activity) {
     showCommentUi: activity.showCommentUi ?? true,
     showQuestionUi: activity.showQuestionUi ?? true,
     showVoteCountToJudge: activity.showVoteCountToJudge ?? false,
+    requireArtworkForVote: activity.requireArtworkForVote ?? true,
   });
   activityDialog.value = true;
 }
@@ -3717,6 +3722,12 @@ onUnmounted(() => {
               <el-switch v-model="activityForm.showVoteCountToJudge" />
               <el-tag :type="activityForm.showVoteCountToJudge ? 'success' : 'info'" size="small">
                 {{ activityForm.showVoteCountToJudge ? '已开启：评委可查看学生得票数' : '未开启：评委无法查看得票数' }}
+              </el-tag>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px">
+              <el-switch v-model="activityForm.requireArtworkForVote" />
+              <el-tag :type="activityForm.requireArtworkForVote ? 'warning' : 'success'" size="small">
+                {{ activityForm.requireArtworkForVote ? '已开启：至少上传 1 张作品图后才能投票' : '已关闭：无作品图也可直接投票' }}
               </el-tag>
             </div>
           </div>
