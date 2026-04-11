@@ -11,6 +11,7 @@ import { dayjs, formatBJ } from "../date";
 import { useSyncStore } from "../stores/sync";
 import { useModalHistory } from "../composables/useModalHistory";
 import { matchesSearchKeyword } from "../utils/search";
+import { shouldUseNativeCameraUpload } from "../utils/camera";
 import type { Activity, ActivityCustomRole, Group, ScoreTemplate, Student, StudentArtwork } from "../types";
 
 const ImportDialog = defineAsyncComponent(() => import("../components/ImportDialog.vue"));
@@ -1741,15 +1742,23 @@ function downloadQrcode(url: string, name: string) {
 }
 
 function triggerAdminArtworkUpload(studentId: string, mode: "camera" | "gallery" = "camera") {
+  const inputId = mode === "camera"
+    ? (shouldUseNativeCameraUpload() ? `admin-artwork-input-cam-${studentId}` : "")
+    : `admin-artwork-input-gal-${studentId}`;
+
+  if (inputId) {
+    const input = document.getElementById(inputId) as HTMLInputElement | null;
+    if (input) {
+      input.value = "";
+      input.click();
+      return;
+    }
+  }
+
   if (mode === "camera") {
     adminCameraStudentId.value = studentId;
     adminCameraOpen.value = true;
     return;
-  }
-  const input = document.getElementById(`admin-artwork-input-gal-${studentId}`) as HTMLInputElement | null;
-  if (input) {
-    input.value = "";
-    input.click();
   }
 }
 
@@ -3083,6 +3092,14 @@ onUnmounted(() => {
                         选图
                       </el-button>
                     </div>
+                    <input
+                      :id="`admin-artwork-input-cam-${student.id}`"
+                      accept="image/*"
+                      capture="environment"
+                      type="file"
+                      class="visually-hidden"
+                      @change="onAdminArtworkInputChange(student, $event)"
+                    />
                     <input
                       :id="`admin-artwork-input-gal-${student.id}`"
                       accept="image/*"

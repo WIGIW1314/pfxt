@@ -13,6 +13,7 @@ import { formatBJ } from "../date";
 import { useModalHistory } from "../composables/useModalHistory";
 import { distributeScore } from "../score-distribute";
 import { matchesSearchKeyword } from "../utils/search";
+import { shouldUseNativeCameraUpload } from "../utils/camera";
 import type { ScoreTemplate, Student, StudentArtwork } from "../types";
 
 const ScoreDialog = defineAsyncComponent(() => import("../components/ScoreDialog.vue"));
@@ -374,15 +375,23 @@ async function resetScore(student: Student) {
 }
 
 function triggerJudgeArtworkUpload(studentId: string, mode: "camera" | "gallery" = "camera") {
+  const inputId = mode === "camera"
+    ? (shouldUseNativeCameraUpload() ? `judge-artwork-input-cam-${studentId}` : "")
+    : `judge-artwork-input-gal-${studentId}`;
+
+  if (inputId) {
+    const input = document.getElementById(inputId) as HTMLInputElement | null;
+    if (input) {
+      input.value = "";
+      input.click();
+      return;
+    }
+  }
+
   if (mode === "camera") {
     cameraStudentId.value = studentId;
     cameraOpen.value = true;
     return;
-  }
-  const input = document.getElementById(`judge-artwork-input-gal-${studentId}`) as HTMLInputElement | null;
-  if (input) {
-    input.value = "";
-    input.click();
   }
 }
 
@@ -1205,6 +1214,14 @@ onBeforeRouteUpdate(async () => {
                       </el-button>
                     </div>
                     <input
+                      :id="`judge-artwork-input-cam-${student.id}`"
+                      accept="image/*"
+                      capture="environment"
+                      type="file"
+                      class="visually-hidden"
+                      @change="onJudgeArtworkInputChange(student, $event)"
+                    />
+                    <input
                       :id="`judge-artwork-input-gal-${student.id}`"
                       accept="image/*"
                       type="file"
@@ -1577,6 +1594,14 @@ onBeforeRouteUpdate(async () => {
                     相册
                   </el-button>
                 </div>
+                <input
+                  :id="`judge-artwork-input-cam-${student.id}`"
+                  accept="image/*"
+                  capture="environment"
+                  type="file"
+                  class="visually-hidden"
+                  @change="onJudgeArtworkInputChange(student, $event)"
+                />
                 <input
                   :id="`judge-artwork-input-gal-${student.id}`"
                   accept="image/*"
