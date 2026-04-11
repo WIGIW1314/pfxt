@@ -74,6 +74,8 @@
 
 /* el-image 预览查看器 — 确保移动端图片完整可见 */
 .el-image-viewer__wrapper {
+  position: fixed !important;
+  inset: 0 !important;
   z-index: 9999 !important;
 }
 

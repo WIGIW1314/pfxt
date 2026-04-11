@@ -1131,6 +1131,7 @@ onBeforeRouteUpdate(async () => {
           <el-image
             :src="currentActivity.group.qrcodeUrl"
             :preview-src-list="[currentActivity.group.qrcodeUrl]"
+            :preview-teleported="true"
             fit="contain"
             loading="lazy"
             style="width: 200px; height: 200px; border-radius: 8px; border: 1px solid var(--el-border-color-lighter); cursor: pointer"
@@ -1217,6 +1218,7 @@ onBeforeRouteUpdate(async () => {
                       <el-image
                         :src="artwork.url"
                         :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                        :preview-teleported="true"
                         :initial-index="index"
                         fit="cover"
                         class="judge-artwork-image"
@@ -1589,6 +1591,7 @@ onBeforeRouteUpdate(async () => {
                   <el-image
                     :src="artwork.url"
                     :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                    :preview-teleported="true"
                     :initial-index="index"
                     fit="cover"
                     class="judge-artwork-image"

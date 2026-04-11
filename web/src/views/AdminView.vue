@@ -2980,6 +2980,7 @@ onUnmounted(() => {
                   <el-image
                     :src="group.qrcodeUrl"
                     :preview-src-list="[group.qrcodeUrl]"
+                    :preview-teleported="true"
                     fit="contain"
                     loading="lazy"
                     style="width: 80px; height: 80px; border-radius: 4px; border: 1px solid var(--el-border-color-lighter); cursor: pointer"
@@ -3096,6 +3097,7 @@ onUnmounted(() => {
                       <el-image
                         :src="artwork.url"
                         :preview-src-list="getStudentArtworks(student).map((item) => item.url)"
+                        :preview-teleported="true"
                         :initial-index="index"
                         fit="cover"
                         class="admin-student-artwork-image"
@@ -3529,6 +3531,7 @@ onUnmounted(() => {
                       <el-image
                         :src="row.artworks[0].url"
                         :preview-src-list="row.artworks.map((a) => a.url)"
+                        :preview-teleported="true"
                         fit="cover"
                         style="width: 100%; height: 100%; cursor: pointer;"
                       />
@@ -3879,6 +3882,7 @@ onUnmounted(() => {
             v-if="groupForm.qrcodeUrl"
             :src="groupForm.qrcodeUrl"
             :preview-src-list="[groupForm.qrcodeUrl]"
+            :preview-teleported="true"
             fit="contain"
             loading="lazy"
             style="width: 120px; height: 120px; margin-top: 8px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter)"
