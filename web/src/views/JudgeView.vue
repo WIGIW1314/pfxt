@@ -1179,11 +1179,6 @@ onBeforeRouteUpdate(async () => {
                     <el-tag v-if="currentActivity?.activity?.showVoteCountToJudge" round>得票 {{ student.summary?.submittedJudgeCount ?? 0 }}</el-tag>
                   </div>
                 </div>
-                <template v-if="student.myVoted">
-                  <div style="display: flex; gap: 8px; margin-top: 8px">
-                    <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
-                  </div>
-                </template>
                 <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
                   <div class="judge-artwork-header">
                     <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
@@ -1241,6 +1236,11 @@ onBeforeRouteUpdate(async () => {
                   <div v-if="!student.myVoted && !canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
                 </div>
                 <el-button v-if="!student.myVoted" :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+                <template v-if="student.myVoted">
+                  <div style="display: flex; gap: 8px; margin-top: 8px">
+                    <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
+                  </div>
+                </template>
               </template>
               <template v-else>
               <div class="panel-header">
@@ -1551,11 +1551,6 @@ onBeforeRouteUpdate(async () => {
                 <el-tag v-if="currentActivity?.activity?.showVoteCountToJudge" round>得票 {{ student.summary?.submittedJudgeCount ?? 0 }}</el-tag>
               </div>
             </div>
-            <template v-if="student.myVoted">
-              <div style="display: flex; gap: 8px; margin-top: 8px">
-                <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
-              </div>
-            </template>
             <div class="judge-artwork-panel" :class="{ 'need-upload': !canStudentVote(student) }">
               <div class="judge-artwork-header">
                 <span class="muted">作品图 {{ getStudentArtworkCount(student) }}/5</span>
@@ -1613,6 +1608,11 @@ onBeforeRouteUpdate(async () => {
               <div v-if="!student.myVoted && !canStudentVote(student)" class="judge-vote-block-hint">请先上传作品图后再投票</div>
             </div>
             <el-button v-if="!student.myVoted" :disabled="isLocked || !canStudentVote(student)" :loading="scoreOpening" type="primary" style="width: 100%; margin-top: 8px" @click="castVote(student)">投票</el-button>
+            <template v-if="student.myVoted">
+              <div style="display: flex; gap: 8px; margin-top: 8px">
+                <el-button type="warning" plain :disabled="isLocked" :loading="resettingStudentId === student.id" style="flex: 1" @click="resetScore(student)">撤回投票</el-button>
+              </div>
+            </template>
           </div>
         </div>
       </section>

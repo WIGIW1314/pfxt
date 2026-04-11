@@ -40,6 +40,7 @@ const activity = ref<any>(null);
 const collapsedGroups = ref<Record<string, boolean>>({});
 const collapsedStudentLists = ref<Record<string, boolean>>({});
 let eventSource: EventSource | null = null;
+let publicRefreshTimer: number | null = null;
 
 const activeTemplate = computed(() => {
   if (!activity.value?.templates?.length) return null;
@@ -117,7 +118,20 @@ async function silentRefresh() {
 
 function connectSSE() {
   if (eventSource) return;
-  eventSource = new EventSource(`${API_BASE}/api/public/events`);
+  if (typeof window === "undefined") return;
+  if (typeof window.EventSource === "undefined") {
+    startPollingRefresh();
+    return;
+  }
+  try {
+    eventSource = new window.EventSource(`${API_BASE}/api/public/events`);
+  } catch {
+    startPollingRefresh();
+    return;
+  }
+  eventSource.onopen = () => {
+    stopPollingRefresh();
+  };
   eventSource.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
@@ -129,9 +143,24 @@ function connectSSE() {
   eventSource.onerror = () => {
     eventSource?.close();
     eventSource = null;
+    startPollingRefresh();
     // auto-reconnect after 3s
     setTimeout(connectSSE, 3000);
   };
+}
+
+function startPollingRefresh() {
+  if (publicRefreshTimer !== null) return;
+  if (typeof window === "undefined") return;
+  publicRefreshTimer = window.setInterval(() => {
+    void silentRefresh();
+  }, 30000);
+}
+
+function stopPollingRefresh() {
+  if (publicRefreshTimer === null) return;
+  clearInterval(publicRefreshTimer);
+  publicRefreshTimer = null;
 }
 
 onMounted(() => {
@@ -143,6 +172,7 @@ onMounted(() => {
 onUnmounted(() => {
   eventSource?.close();
   eventSource = null;
+  stopPollingRefresh();
 });
 
 watch(
